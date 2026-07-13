@@ -715,6 +715,7 @@ function openModal(view, plan) {
   setTimeout(() => input && input.focus(), 350);
 }
 function closeModal() {
+  if (typeof cleanupLiveOutputs === 'function') cleanupLiveOutputs();
   gsap.to(modalCard, {
     scale: 0.92, opacity: 0, y: 16, duration: 0.28, ease: 'power2.in',
     onComplete: () => { modal.classList.remove('is-open'); modal.setAttribute('aria-hidden', 'true'); gsap.set(modalCard, { clearProps: 'all' }); },
@@ -910,98 +911,406 @@ function slugify(s) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'ma-fonction';
 }
 
+/* ─── GÉNÉRATION RÉELLE ───────────────────────────────────
+   Texte / code / analyse : vrais LLM ouverts via l'API libre et
+   gratuite text.pollinations.ai (sans clé).
+   Image / vidéo : vrai FLUX via image.pollinations.ai.
+   Site : HTML généré par le LLM puis RENDU dans la modale.
+   3D : objet réel sculpté par le prompt, manipulable à la souris.
+   Audio : vraie synthèse vocale (Web Speech) + mélodie Web Audio.
+   Si le réseau est coupé (aperçu sandboxé / hors-ligne) : repli
+   automatique en démo locale, clairement signalé. ─────────── */
+
+function aiStatusLine(ok) {
+  const p = document.createElement('p');
+  p.className = 'play__pipe';
+  p.innerHTML = ok
+    ? '<b>✓</b> IA en ligne — modèles ouverts via <b>pollinations.ai</b>'
+    : '<b>⚠</b> Réseau coupé dans cet environnement (aperçu sandboxé&nbsp;?) — repli en démo locale. Sur la version locale ou hébergée, cette génération est réelle.';
+  playOut.appendChild(p);
+}
+
+async function llm(prompt, timeout = 35000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt), { signal: ctrl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const text = (await r.text()).trim();
+    if (!text) throw new Error('réponse vide');
+    return text;
+  } finally { clearTimeout(timer); }
+}
+
+function aiImageUrl(prompt, seed, w = 768, h = 432) {
+  return 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) +
+    `?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+}
+
+function loadImage(url, timeout = 60000) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const t = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, timeout);
+    img.onload = () => { clearTimeout(t); resolve(img); };
+    img.onerror = () => { clearTimeout(t); reject(new Error('chargement')); };
+    img.src = url;
+  });
+}
+
+const stripFences = (s) => s.replace(/^```[a-z]*\s*\n?/i, '').replace(/```\s*$/m, '').trim();
+
+/* nettoyage des sorties vivantes (3D, vidéo, voix) */
+let mini3d = null, vidRaf = 0;
+function cleanupLiveOutputs() {
+  if (mini3d) { cancelAnimationFrame(mini3d.raf); mini3d.renderer.dispose(); mini3d = null; }
+  if (vidRaf) { cancelAnimationFrame(vidRaf); vidRaf = 0; }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return false;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'fr-FR'; u.rate = 1.02; u.pitch = 0.75; /* voix grave d'androïde */
+  const voices = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.startsWith('fr'));
+  if (voices.length) u.voice = voices[0];
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+  return true;
+}
+
+/* objet 3D réel, sculpté par le prompt, manipulable */
+function spawnMini3d(rng) {
+  const canvas = document.createElement('canvas');
+  canvas.className = 'play__mini3d';
+  playOut.appendChild(canvas);
+  const W = Math.max(playOut.clientWidth - 4, 320), H = 280;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(W, H, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene();
+  scene.environment = heroScene.environment;
+  const cam = new THREE.PerspectiveCamera(38, W / H, 0.1, 50);
+  cam.position.set(0, 0.3, 3.3);
+  scene.add(new THREE.AmbientLight(0x404060, 2));
+  const l1 = new THREE.PointLight(0x22d3ee, 40, 20); l1.position.set(3, 2, 3); scene.add(l1);
+  const l2 = new THREE.PointLight(0xe879f9, 40, 20); l2.position.set(-3, -1, 2); scene.add(l2);
+
+  const geo = new THREE.IcosahedronGeometry(1, 16);
+  const posAttr = geo.attributes.position;
+  const v = new THREE.Vector3();
+  const f1 = 1.5 + rng() * 3.5, f2 = 1.5 + rng() * 4.5, amp = 0.12 + rng() * 0.24;
+  for (let i = 0; i < posAttr.count; i++) {
+    v.fromBufferAttribute(posAttr, i);
+    const d = 1 + amp * Math.sin(v.x * f1 + v.y * f2) * Math.cos(v.z * f2 - v.y * f1);
+    v.normalize().multiplyScalar(d);
+    posAttr.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color().setHSL(rng(), 0.7, 0.55),
+    metalness: 0.45, roughness: 0.22, clearcoat: 0.8,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  const wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x22d3ee, wireframe: true, transparent: true, opacity: 0.07 }));
+  wire.scale.setScalar(1.003);
+  scene.add(mesh, wire);
+
+  let dragging = false, lx = 0, vx = 0;
+  canvas.addEventListener('pointerdown', (e) => { dragging = true; lx = e.clientX; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lx; lx = e.clientX; vx = dx * 0.005;
+    mesh.rotation.y += dx * 0.005;
+  });
+  canvas.addEventListener('pointerup', () => { dragging = false; });
+
+  mini3d = { renderer, raf: 0 };
+  const tick3d = () => {
+    if (!mini3d) return;
+    if (!dragging) { vx *= 0.95; mesh.rotation.y += 0.006 + vx; }
+    mesh.rotation.x = Math.sin(performance.now() * 0.0004) * 0.22;
+    wire.rotation.copy(mesh.rotation);
+    renderer.render(scene, cam);
+    mini3d.raf = requestAnimationFrame(tick3d);
+  };
+  tick3d();
+  return { triangles: Math.round((geo.index ? geo.index.count : posAttr.count) / 3) };
+}
+
+/* lecteur de frames IA : fondu enchaîné + léger zoom (Ken Burns) */
+function playFrames(imgs) {
+  const c = document.createElement('canvas');
+  c.width = 768; c.height = 432; c.className = 'play__canvas';
+  playOut.appendChild(c);
+  const ctx = c.getContext('2d');
+  const per = 2000, fade = 600;
+  const start = performance.now();
+  const drawImg = (img, tt, alpha) => {
+    ctx.globalAlpha = alpha;
+    const zoom = 1.03 + 0.07 * tt;
+    ctx.save();
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.scale(zoom, zoom);
+    ctx.drawImage(img, -c.width / 2, -c.height / 2, c.width, c.height);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  };
+  const draw = (now) => {
+    const t = now - start;
+    const i = Math.floor(t / per) % imgs.length;
+    const tt = (t % per) / per;
+    drawImg(imgs[i], tt, 1);
+    const ft = (t % per) - (per - fade);
+    if (ft > 0) drawImg(imgs[(i + 1) % imgs.length], 0, ft / fade);
+    vidRaf = requestAnimationFrame(draw);
+  };
+  vidRaf = requestAnimationFrame(draw);
+}
+
+/* vidéo procédurale de secours (hors-ligne) : courbes animées */
+function proceduralVideo(rng) {
+  const c = document.createElement('canvas');
+  c.width = 768; c.height = 432; c.className = 'play__canvas';
+  playOut.appendChild(c);
+  const ctx = c.getContext('2d');
+  const seeds = Array.from({ length: 14 }, () => ({ a: rng() * 6.28, b: rng() * 6.28, f: 0.5 + rng() * 1.5, hue: rng() }));
+  const palette = ['#8b5cf6', '#22d3ee', '#e879f9'];
+  const draw = (now) => {
+    ctx.fillStyle = 'rgba(8,6,18,0.16)';
+    ctx.fillRect(0, 0, c.width, c.height);
+    const t = now * 0.001;
+    seeds.forEach((s, i) => {
+      ctx.strokeStyle = palette[i % 3] + 'aa';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (let k = 0; k <= 60; k++) {
+        const p = k / 60;
+        const x = c.width * (0.1 + 0.8 * p);
+        const y = c.height * (0.5 + 0.36 * Math.sin(p * 6.28 * s.f + t * s.f + s.a) * Math.cos(t * 0.7 + s.b + p * 3));
+        k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    });
+    vidRaf = requestAnimationFrame(draw);
+  };
+  vidRaf = requestAnimationFrame(draw);
+}
+
+/* page HTML rendue dans la modale + code source */
+function showSite(html, label) {
+  const frame = document.createElement('iframe');
+  frame.className = 'play__frame';
+  frame.setAttribute('sandbox', '');
+  frame.srcdoc = html;
+  playOut.appendChild(frame);
+  const meta = document.createElement('p');
+  meta.className = 'play__meta';
+  meta.textContent = label;
+  playOut.appendChild(meta);
+  const tog = document.createElement('button');
+  tog.className = 'chip play__replay';
+  tog.textContent = '</> Voir le code source';
+  const codeEl = document.createElement('code');
+  codeEl.className = 'play__code';
+  codeEl.style.display = 'none';
+  codeEl.textContent = html;
+  tog.addEventListener('click', () => {
+    codeEl.style.display = codeEl.style.display === 'none' ? 'block' : 'none';
+  });
+  playOut.appendChild(tog);
+  playOut.appendChild(codeEl);
+}
+
+function localSiteHTML(prompt) {
+  const title = prompt.charAt(0).toUpperCase() + prompt.slice(1);
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
+  body{margin:0;font-family:system-ui,sans-serif;background:#0b0818;color:#f2f0fa}
+  header{padding:64px 24px;text-align:center;background:linear-gradient(120deg,#22d3ee33,#8b5cf633,#e879f933)}
+  h1{font-size:2.2rem;margin:0 0 12px}p{color:#b9b3d4;max-width:560px;margin:0 auto;line-height:1.6}
+  .cta{display:inline-block;margin-top:24px;padding:12px 28px;border-radius:99px;background:linear-gradient(100deg,#22d3ee,#8b5cf6,#e879f9);color:#fff;text-decoration:none;font-weight:600}
+  section{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:32px 24px;max-width:860px;margin:auto}
+  .card{border:1px solid #ffffff1a;border-radius:14px;padding:18px;background:#ffffff08}
+  </style></head><body>
+  <header><h1>${title}</h1><p>Une page générée à partir de votre prompt. Version hors-ligne — en ligne, ce HTML est écrit par un vrai LLM.</p><a class="cta" href="#">Commencer</a></header>
+  <section><div class="card"><h3>Simple</h3><p>Structure claire, prête à éditer.</p></div>
+  <div class="card"><h3>Rapide</h3><p>Aucune dépendance, tout est inline.</p></div>
+  <div class="card"><h3>À vous</h3><p>Récupérez le code source ci-dessous.</p></div></section>
+  </body></html>`;
+}
+
 let generating = false;
 async function generate() {
   if (generating) return;
   const prompt = playPrompt.value.trim() || 'quelque chose de beau';
   const cfg = PLAY_CAPS[currentCap];
   const rng = seededRng(prompt + currentCap);
+  const seed = Math.floor(seededRng(prompt)() * 1e6);
   generating = true;
   playGo.disabled = true;
   playGo.querySelector('span').textContent = 'Génération…';
+  cleanupLiveOutputs();
   playOut.innerHTML = '';
 
-  await pipeline([`Chargement de <b>${cfg.model}</b>`, 'Inférence locale (démo navigateur)']);
+  try {
+    /* ── TEXTE / ANALYSE / CODE : vrai LLM ── */
+    if (cfg.type === 'text' || cfg.type === 'code') {
+      await pipeline([`Appel du modèle <b>${cfg.model}</b>`]);
+      const instruction = cfg.type === 'code'
+        ? `Écris uniquement du code répondant à cette demande : "${prompt}". Choisis le langage le plus adapté. Réponds SEULEMENT avec le code (commentaires brefs autorisés), sans explication autour.`
+        : currentCap === 'analyse'
+          ? `Tu es un analyste. En français, structure une courte analyse (max 160 mots, avec 3 points numérotés) sur : "${prompt}".`
+          : `Tu es LUMEN, une IA française serviable. Réponds en français, de façon naturelle et utile (max 160 mots) à : "${prompt}".`;
+      let out;
+      try {
+        out = await llm(instruction);
+        aiStatusLine(true);
+      } catch (err) {
+        aiStatusLine(false);
+        out = null;
+      }
+      if (cfg.type === 'code') {
+        const el = document.createElement('code');
+        el.className = 'play__code';
+        playOut.appendChild(el);
+        await typewriter(el, out ? stripFences(out) : `// ${prompt}\n// (démo locale — hors-ligne)\nexport function ${slugify(prompt).replace(/-/g, '_')}(entree) {\n  return ['analyser', 'transformer', 'valider']\n    .reduce((acc, etape) => appliquer(etape, acc), entree);\n}`, 6);
+      } else {
+        const el = document.createElement('p');
+        el.className = 'play__text';
+        playOut.appendChild(el);
+        await typewriter(el, out || `« ${prompt} », donc. (Réseau indisponible ici — sur la version locale ou hébergée, cette réponse vient d'un vrai modèle ouvert.)`, 9);
+      }
+    }
 
-  if (cfg.type === 'text') {
-    const el = document.createElement('p');
-    el.className = 'play__text';
-    playOut.appendChild(el);
-    const intro = currentCap === 'analyse'
-      ? `Analyse de « ${prompt} » — trois signaux ressortent.\n\n1. La tendance de fond est claire et mesurable sur les données fournies.\n2. Deux segments se détachent nettement ; le troisième mérite un test dédié.\n3. Recommandation : commencer petit, instrumenter, itérer chaque semaine.\n\n(Sortie de démonstration générée localement — branchez vos vraies données pour la version complète.)`
-      : `« ${prompt} », donc. Voici une première proposition.\n\nIl y a mille façons d'en parler, mais la meilleure tient en une idée simple : montrer plutôt que promettre. Un paragraphe qui pose le décor, une phrase qui accroche, et une chute qui donne envie de cliquer.\n\n(Sortie de démonstration générée localement — la version complète branche un vrai LLM open source.)`;
-    await typewriter(el, intro, 11);
+    /* ── IMAGE : vrai FLUX ── */
+    if (cfg.type === 'image') {
+      await pipeline([`Diffusion <b>FLUX</b> — seed ${seed}`]);
+      const wait = document.createElement('p');
+      wait.className = 'play__pipe';
+      wait.innerHTML = '⚙ Génération de l\'image (quelques secondes)…';
+      playOut.appendChild(wait);
+      try {
+        const img = await loadImage(aiImageUrl(prompt, seed));
+        wait.innerHTML = '<b>✓</b> Image générée';
+        aiStatusLine(true);
+        img.className = 'play__canvas';
+        playOut.appendChild(img);
+        gsap.from(img, { opacity: 0, scale: 0.96, duration: 0.7, ease: 'power3.out' });
+        const meta = document.createElement('p');
+        meta.className = 'play__meta';
+        meta.textContent = `FLUX (open weights) via pollinations.ai · « ${prompt} » · seed ${seed} · 768 × 432`;
+        playOut.appendChild(meta);
+      } catch (err) {
+        wait.innerHTML = '<b>⚠</b> Génération distante impossible';
+        aiStatusLine(false);
+        const canvas = drawArt(prompt, rng);
+        playOut.appendChild(canvas);
+        const meta = document.createElement('p');
+        meta.className = 'play__meta';
+        meta.textContent = 'Repli : art procédural local. En ligne, cette case affiche une vraie image FLUX.';
+        playOut.appendChild(meta);
+      }
+    }
+
+    /* ── VIDÉO : frames FLUX animées ── */
+    if (cfg.type === 'steps' && currentCap === 'video') {
+      await pipeline(['Storyboard (4 plans)']);
+      const wait = document.createElement('p');
+      wait.className = 'play__pipe';
+      wait.innerHTML = '⚙ Génération des 4 images clés…';
+      playOut.appendChild(wait);
+      try {
+        const imgs = await Promise.all([0, 1, 2, 3].map((k) =>
+          loadImage(aiImageUrl(`${prompt}, cinematic, plan ${k + 1} sur 4`, seed + k, 768, 432))));
+        wait.innerHTML = '<b>✓</b> 4 images clés générées';
+        aiStatusLine(true);
+        playFrames(imgs);
+        const meta = document.createElement('p');
+        meta.className = 'play__meta';
+        meta.textContent = `Séquence animée à partir de 4 vraies images FLUX · « ${prompt} » — la version complète interpole à 24 i/s.`;
+        playOut.appendChild(meta);
+      } catch (err) {
+        wait.innerHTML = '<b>⚠</b> Génération distante impossible';
+        aiStatusLine(false);
+        proceduralVideo(rng);
+        const meta = document.createElement('p');
+        meta.className = 'play__meta';
+        meta.textContent = 'Repli : animation procédurale locale. En ligne, la séquence est faite de vraies images FLUX.';
+        playOut.appendChild(meta);
+      }
+    }
+
+    /* ── SITE : HTML écrit par le LLM, rendu ici ── */
+    if (cfg.type === 'steps' && currentCap === 'site') {
+      await pipeline(['Brief → structure → style']);
+      let html = null;
+      try {
+        html = stripFences(await llm(
+          `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Contraintes : tout le CSS dans une balise <style> (design sombre moderne, dégradés), AUCUN JavaScript, AUCUNE ressource externe (ni image, ni police), textes en français réalistes. Réponds UNIQUEMENT avec le code HTML, sans backticks ni commentaire autour.`, 45000));
+        if (!/</.test(html || '')) throw new Error('sortie invalide');
+        aiStatusLine(true);
+      } catch (err) {
+        aiStatusLine(false);
+      }
+      showSite(html || localSiteHTML(prompt),
+        html ? `Page écrite par un LLM ouvert et rendue ci-dessus · « ${prompt} »` : `Page construite localement · « ${prompt} »`);
+    }
+
+    /* ── 3D : objet réel manipulable ── */
+    if (cfg.type === 'steps' && currentCap === 'jeu') {
+      await pipeline(['Maillage sculpté par le prompt', 'Matériau PBR + clearcoat']);
+      const info = spawnMini3d(rng);
+      const meta = document.createElement('p');
+      meta.className = 'play__meta';
+      meta.textContent = `Objet 3D réel (${info.triangles.toLocaleString('fr-FR')} triangles) rendu en WebGL — cliquer-glisser pour le faire tourner. La version complète le remplace par du text-to-3D (TripoSR).`;
+      playOut.appendChild(meta);
+    }
+
+    /* ── AUDIO : vraie voix + mélodie ── */
+    if (cfg.type === 'audio') {
+      await pipeline(['Synthèse de la mélodie', 'Préparation de la voix']);
+      const eq = document.createElement('div');
+      eq.className = 'play__eq';
+      for (let i = 0; i < 28; i++) eq.appendChild(document.createElement('span'));
+      playOut.appendChild(eq);
+      const bars = [...eq.children];
+      playMelody(rng, bars);
+      let phrase = `${prompt}. Voilà ce que je peux chanter pour toi, humain.`;
+      try {
+        phrase = await llm(`En une ou deux phrases courtes en français, réponds avec personnalité (tu es LUMEN, une IA androïde calme) à : "${prompt}".`, 20000);
+        aiStatusLine(true);
+      } catch (err) { /* la voix locale marche quand même */ }
+      const meta = document.createElement('p');
+      meta.className = 'play__meta';
+      meta.textContent = 'Mélodie synthétisée en Web Audio + voix française de votre navigateur (Web Speech).';
+      playOut.appendChild(meta);
+      const row = document.createElement('div');
+      const voiceBtn = document.createElement('button');
+      voiceBtn.className = 'chip play__replay';
+      voiceBtn.textContent = '🔊 Écouter la voix';
+      voiceBtn.addEventListener('click', () => {
+        if (!speak(phrase)) showToast('Synthèse vocale non disponible dans ce navigateur');
+      });
+      const replay = document.createElement('button');
+      replay.className = 'chip play__replay';
+      replay.style.marginLeft = '0.5rem';
+      replay.textContent = '↻ Rejouer la mélodie';
+      replay.addEventListener('click', () => playMelody(seededRng(prompt + currentCap), bars));
+      row.appendChild(voiceBtn); row.appendChild(replay);
+      playOut.appendChild(row);
+      speak(phrase);
+      const txt = document.createElement('p');
+      txt.className = 'play__text';
+      txt.textContent = '« ' + phrase + ' »';
+      playOut.appendChild(txt);
+    }
+  } finally {
+    playGo.disabled = false;
+    playGo.querySelector('span').textContent = 'Générer';
+    generating = false;
+    playEmote('agree', true);
   }
-
-  if (cfg.type === 'code') {
-    const el = document.createElement('code');
-    el.className = 'play__code';
-    playOut.appendChild(el);
-    const fn = slugify(prompt).replace(/-/g, '_');
-    await typewriter(el,
-`// ${prompt}
-export function ${fn}(entree) {
-  const etapes = ['analyser', 'transformer', 'valider'];
-  return etapes.reduce(
-    (acc, etape) => appliquer(etape, acc),
-    entree,
-  );
-}
-
-// Démo générée localement — la version complète
-// branche DeepSeek Coder sur votre dépôt.`, 8);
-  }
-
-  if (cfg.type === 'image') {
-    const canvas = drawArt(prompt, rng);
-    playOut.appendChild(canvas);
-    gsap.from(canvas, { opacity: 0, scale: 0.94, duration: 0.7, ease: 'power3.out' });
-    const meta = document.createElement('p');
-    meta.className = 'play__meta';
-    meta.textContent = `${cfg.model} · « ${prompt} » · 640 × 360 · art procédural de démo, généré dans votre navigateur`;
-    playOut.appendChild(meta);
-  }
-
-  if (cfg.type === 'audio') {
-    const eq = document.createElement('div');
-    eq.className = 'play__eq';
-    for (let i = 0; i < 28; i++) eq.appendChild(document.createElement('span'));
-    playOut.appendChild(eq);
-    const bars = [...eq.children];
-    playMelody(rng, bars);
-    const meta = document.createElement('p');
-    meta.className = 'play__meta';
-    meta.textContent = `${cfg.model} · mélodie synthétisée en direct par la Web Audio API, semée par votre prompt`;
-    playOut.appendChild(meta);
-    const replay = document.createElement('button');
-    replay.className = 'chip play__replay';
-    replay.textContent = '↻ Rejouer';
-    replay.addEventListener('click', () => playMelody(seededRng(prompt + currentCap), bars));
-    playOut.appendChild(replay);
-  }
-
-  if (cfg.type === 'steps') {
-    const extra = {
-      video: ['Storyboard (4 plans)', 'Génération des images clés', 'Interpolation 24 i/s', 'Encodage h264'],
-      site: ['Arborescence & contenu', 'Design system (3 variantes)', 'Intégration responsive', 'Déploiement de prévisualisation'],
-      jeu: ['Maillage 3D depuis le prompt', 'Textures PBR', 'Rig & colliders', 'Export glTF'],
-    }[currentCap];
-    await pipeline(extra);
-    const el = document.createElement('p');
-    el.className = 'play__text';
-    playOut.appendChild(el);
-    const outros = {
-      video: `🎬 Clip « ${prompt} » prêt : 6 s, 24 i/s, 1280×720.\nDans la vraie plateforme, le fichier apparaît ici avec sa timeline éditable.`,
-      site: `🌐 Prévisualisation de « ${prompt} » déployée sur https://demo.lumen-ia.fr/${slugify(prompt)}\nDans la vraie plateforme, ce lien est cliquable et le site éditable en langage naturel.`,
-      jeu: `🎮 Modèle 3D « ${prompt} » exporté en glTF (12 400 triangles, PBR).\nDans la vraie plateforme, il se charge ici même, manipulable comme le robot du hero.`,
-    };
-    await typewriter(el, outros[currentCap], 12);
-  }
-
-  playGo.disabled = false;
-  playGo.querySelector('span').textContent = 'Générer';
-  generating = false;
-  playEmote('agree', true);
 }
 playGo.addEventListener('click', generate);
 playPrompt.addEventListener('keydown', (e) => { if (e.key === 'Enter') generate(); });
