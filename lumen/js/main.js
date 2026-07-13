@@ -157,6 +157,49 @@ let activeAction = null;
 const EMOTES = ['Wave', 'Dance', 'ThumbsUp', 'Jump', 'Yes', 'No', 'Punch'];
 let robotReady = false;
 
+/* ─── personnalité ─── */
+let headBone = null, faceMesh = null;
+const headLook = { x: 0, y: 0, ox: 0, oy: 0 };   // regard lissé + offset « distraction »
+const bubble = document.getElementById('robotBubble');
+const _headPos = new THREE.Vector3();
+let bubbleTimer = null;
+
+function say(text, duration = 2600) {
+  if (!bubble) return;
+  bubble.textContent = text;
+  bubble.classList.add('is-visible');
+  clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(() => bubble.classList.remove('is-visible'), duration);
+}
+
+function setFace(name, intensity = 1, duration = 1.1) {
+  if (!faceMesh) return;
+  const idx = faceMesh.morphTargetDictionary[name];
+  if (idx === undefined) return;
+  gsap.to(faceMesh.morphTargetInfluences, {
+    [idx]: intensity, duration: 0.18, ease: 'power2.out',
+    onComplete: () => gsap.to(faceMesh.morphTargetInfluences, { [idx]: 0, duration: 0.5, delay: duration, ease: 'power2.inOut' }),
+  });
+}
+
+const EMOTE_FX = {
+  Wave:     { say: 'Salut toi 👋',                    face: 'Surprised' },
+  Dance:    { say: 'Monte le son 🎶',                 face: 'Surprised' },
+  ThumbsUp: { say: 'Validé, chef.',                   face: null },
+  Jump:     { say: 'Wouhouuu !',                      face: 'Surprised' },
+  No:       { say: 'Hmm… non. On peut mieux faire.',  face: 'Angry' },
+  Yes:      { say: 'Carrément.',                      face: null },
+  Punch:    { say: 'Bug écrasé 🐛',                   face: 'Angry' },
+};
+
+const IDLE_PHRASES = [
+  'On crée quoi aujourd’hui ?',
+  'Psst… clique sur « Essayer en direct ».',
+  '126 modèles dans le ventre, quand même.',
+  'Tout open source. Fouille, je n’ai rien à cacher.',
+  'Je peux danser aussi, tu sais.',
+];
+
 function fadeToAction(name, duration = 0.35) {
   const next = actions[name];
   if (!next || next === activeAction) return;
@@ -166,9 +209,37 @@ function fadeToAction(name, duration = 0.35) {
   next.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).fadeIn(duration).play();
 }
 
-function playEmote(name) {
+function playEmote(name, quiet = false) {
   if (!robotReady || !actions[name]) return;
   fadeToAction(name, 0.25);
+  const fx = EMOTE_FX[name];
+  if (fx && !quiet) {
+    if (fx.say) say(fx.say);
+    if (fx.face) setFace(fx.face, 1, 0.9);
+  }
+}
+
+/* petites impulsions de vie quand il ne se passe rien */
+function idleLife() {
+  const delay = 6000 + Math.random() * 8000;
+  setTimeout(() => {
+    if (robotReady && heroVisible && activeAction === actions.Idle && !document.getElementById('modal').classList.contains('is-open')) {
+      const roll = Math.random();
+      if (roll < 0.3) {
+        playEmote('Yes', true);
+      } else if (roll < 0.45) {
+        playEmote('Wave', true);
+        say('👋');
+      } else if (roll < 0.75) {
+        say(IDLE_PHRASES[Math.floor(Math.random() * IDLE_PHRASES.length)], 3200);
+      } else {
+        /* regarde ailleurs un instant, comme distrait */
+        gsap.to(headLook, { ox: (Math.random() - 0.5) * 1.4, oy: (Math.random() - 0.5) * 0.5, duration: 0.1 });
+        setTimeout(() => gsap.to(headLook, { ox: 0, oy: 0, duration: 0.1 }), 1600);
+      }
+    }
+    idleLife();
+  }, delay);
 }
 
 loader.load('assets/models/RobotExpressive.glb',
@@ -189,11 +260,18 @@ loader.load('assets/models/RobotExpressive.glb',
     });
     mixer.addEventListener('finished', () => fadeToAction('Idle', 0.4));
 
+    /* os de la tête (suit le curseur) + visage à morph targets (mimiques) */
+    model.traverse((o) => {
+      if (o.isBone && o.name === 'Head' && !headBone) headBone = o;
+      if (o.morphTargetDictionary && o.morphTargetDictionary.Surprised !== undefined) faceMesh = o;
+    });
+
     fadeToAction('Idle', 0);
     robotReady = true;
     finishPreloader();
     /* petit salut de bienvenue une fois le rideau levé */
-    setTimeout(() => playEmote('Wave'), 1400);
+    setTimeout(() => { playEmote('Wave', true); say('Bienvenue chez LUMEN ✨', 3000); }, 1400);
+    idleLife();
   },
   (e) => { if (e.total) progress.real = Math.max(progress.real, (e.loaded / e.total) * 95); },
   (err) => { console.error('Robot introuvable', err); finishPreloader(); }
@@ -243,6 +321,7 @@ heroCanvas.addEventListener('click', (e) => {
   ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, heroCamera);
   if (raycaster.intersectObjects(robotGroup.children, true).length) {
+    setFace('Surprised', 1, 0.4);
     playEmote(EMOTES[Math.floor(Math.random() * EMOTES.length)]);
     gsap.fromTo(heroFX.bloom, { strength: 0.55 }, { strength: 1.15, duration: 0.25, yoyo: true, repeat: 1, ease: 'power2.out' });
   }
@@ -350,9 +429,27 @@ function tick() {
   if (heroVisible) {
     if (mixer) mixer.update(dt);
     if (robotReady) {
-      robotGroup.rotation.y += 0.05 * dt;
       robotGroup.rotation.x += ((heroMouse.y * 0.05) - robotGroup.rotation.x) * 3 * dt;
       robotGroup.position.x += ((heroMouse.x * 0.25) - robotGroup.position.x) * 3 * dt;
+
+      /* la tête suit le curseur (appliqué APRÈS le mixer, en additif) */
+      if (headBone) {
+        const targX = heroMouse.x * 0.7 + headLook.ox - robotGroup.rotation.y * 0.4;
+        const targY = heroMouse.y * 0.35 + headLook.oy;
+        headLook.x += (targX - headLook.x) * 6 * dt;
+        headLook.y += (targY - headLook.y) * 6 * dt;
+        headBone.rotation.y += headLook.x;
+        headBone.rotation.x += headLook.y;
+
+        /* la bulle suit la tête à l'écran */
+        if (bubble.classList.contains('is-visible')) {
+          headBone.getWorldPosition(_headPos).project(heroCamera);
+          const bx = (_headPos.x * 0.5 + 0.5) * heroCanvas.clientWidth;
+          const by = (-_headPos.y * 0.5 + 0.5) * heroCanvas.clientHeight;
+          bubble.style.left = Math.min(Math.max(bx + 60, 130), heroCanvas.clientWidth - 130) + 'px';
+          bubble.style.top = Math.max(by - 60, 70) + 'px';
+        }
+      }
     }
     /* les teintes des projecteurs dérivent lentement */
     spotA.color.setHSL((0.75 + t * 0.012) % 1, 0.75, 0.6);
@@ -536,3 +633,331 @@ gsap.to('.aurora__blob--3', { xPercent: 12, yPercent: -16, duration: 29, yoyo: t
 
 /* orbe du CTA qui respire */
 gsap.to('.cta__orb', { scale: 1.15, duration: 5, yoyo: true, repeat: -1, ease: 'sine.inOut' });
+
+/* ═══════════════════════════════════════════════════════
+   TOUT FONCTIONNEL : toast, modale, inscription, playground
+   ═══════════════════════════════════════════════════════ */
+
+/* ─── toast ─── */
+const toast = document.getElementById('toast');
+let toastTimer = null;
+function showToast(msg, duration = 3200) {
+  toast.textContent = msg;
+  toast.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('is-visible'), duration);
+}
+
+/* ─── modale ─── */
+const modal = document.getElementById('modal');
+const modalCard = modal.querySelector('.modal__card');
+const viewSignup = document.getElementById('viewSignup');
+const viewPlay = document.getElementById('viewPlay');
+const signupPlanEl = document.getElementById('signupPlan');
+const signupFormWrap = document.getElementById('signupFormWrap');
+const signupSuccess = document.getElementById('signupSuccess');
+let currentPlan = 'Découverte';
+
+function openModal(view, plan) {
+  if (plan) { currentPlan = plan; signupPlanEl.textContent = plan; }
+  viewSignup.hidden = view !== 'signup';
+  viewPlay.hidden = view !== 'play';
+  if (view === 'signup') { signupFormWrap.hidden = false; signupSuccess.hidden = true; }
+  modal.classList.add('is-open');
+  modal.setAttribute('aria-hidden', 'false');
+  gsap.fromTo(modalCard, { scale: 0.86, opacity: 0, y: 26 }, { scale: 1, opacity: 1, y: 0, duration: 0.55, ease: 'back.out(1.6)' });
+  gsap.fromTo(modal.querySelector('.modal__backdrop'), { opacity: 0 }, { opacity: 1, duration: 0.35 });
+  const input = view === 'signup' ? document.getElementById('fName') : document.getElementById('playPrompt');
+  setTimeout(() => input && input.focus(), 350);
+}
+function closeModal() {
+  gsap.to(modalCard, {
+    scale: 0.92, opacity: 0, y: 16, duration: 0.28, ease: 'power2.in',
+    onComplete: () => { modal.classList.remove('is-open'); modal.setAttribute('aria-hidden', 'true'); gsap.set(modalCard, { clearProps: 'all' }); },
+  });
+}
+document.addEventListener('click', (e) => {
+  const opener = e.target.closest('[data-open]');
+  if (opener) { e.preventDefault(); openModal(opener.dataset.open, opener.dataset.plan); return; }
+  if (e.target.closest('[data-close]')) closeModal();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('is-open')) closeModal(); });
+
+/* ─── inscription (démo locale : localStorage) ─── */
+const signupForm = document.getElementById('signupForm');
+signupForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const nameInput = document.getElementById('fName');
+  const emailInput = document.getElementById('fEmail');
+  const errName = document.getElementById('errName');
+  const errEmail = document.getElementById('errEmail');
+  const okName = nameInput.value.trim().length >= 2;
+  const okEmail = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailInput.value.trim());
+  errName.hidden = okName; nameInput.classList.toggle('is-invalid', !okName);
+  errEmail.hidden = okEmail; emailInput.classList.toggle('is-invalid', !okEmail);
+  if (!okName || !okEmail) return;
+
+  const submitBtn = document.getElementById('signupSubmit');
+  submitBtn.disabled = true;
+  submitBtn.querySelector('span').textContent = 'Création…';
+  setTimeout(() => {
+    const accounts = JSON.parse(localStorage.getItem('lumen-accounts') || '[]');
+    accounts.push({ name: nameInput.value.trim(), email: emailInput.value.trim(), plan: currentPlan, at: new Date().toISOString() });
+    localStorage.setItem('lumen-accounts', JSON.stringify(accounts));
+
+    signupFormWrap.hidden = true;
+    signupSuccess.hidden = false;
+    document.getElementById('successMsg').textContent =
+      currentPlan === 'Communauté'
+        ? `${nameInput.value.trim().split(' ')[0]}, on vous garde une place au chaud sur le Discord (démo).`
+        : `Votre compte ${currentPlan} est prêt, ${nameInput.value.trim().split(' ')[0]} — enregistré localement, promis, rien n'est parti sur le réseau.`;
+    gsap.fromTo('.modal__check', { scale: 0 }, { scale: 1, duration: 0.6, ease: 'back.out(2.5)' });
+    showToast(`✓ Compte ${currentPlan} créé — bienvenue !`);
+    submitBtn.disabled = false;
+    submitBtn.querySelector('span').textContent = 'Créer mon compte';
+    playEmote('ThumbsUp', true);
+  }, 900);
+});
+
+/* ─── playground : l'IA « fait des trucs », en local ─── */
+const PLAY_CAPS = {
+  texte:   { chip: '✍️ Texte',   model: 'Mistral 7B Instruct',  type: 'text' },
+  image:   { chip: '🎨 Image',   model: 'FLUX.1 [schnell]',     type: 'image' },
+  video:   { chip: '🎬 Vidéo',   model: 'LTX-Video',            type: 'steps' },
+  code:    { chip: '⌨️ Code',    model: 'DeepSeek Coder 6.7B',  type: 'code' },
+  site:    { chip: '🌐 Site',    model: 'Agents LUMEN',         type: 'steps' },
+  jeu:     { chip: '🎮 3D',      model: 'TripoSR',              type: 'steps' },
+  audio:   { chip: '🎙️ Audio',  model: 'MusicGen small',       type: 'audio' },
+  analyse: { chip: '📊 Analyse', model: 'Llama 3 8B + RAG',     type: 'text' },
+};
+let currentCap = 'texte';
+const playCapsEl = document.getElementById('playCaps');
+Object.entries(PLAY_CAPS).forEach(([key, cfg], i) => {
+  const b = document.createElement('button');
+  b.className = 'chip' + (i === 0 ? ' is-playing' : '');
+  b.textContent = cfg.chip;
+  b.addEventListener('click', () => {
+    currentCap = key;
+    playCapsEl.querySelectorAll('.chip').forEach((c) => c.classList.remove('is-playing'));
+    b.classList.add('is-playing');
+    document.getElementById('playPrompt').focus();
+  });
+  playCapsEl.appendChild(b);
+});
+
+/* les cartes capacités ouvrent le playground pré-réglé */
+const CAP_ORDER = ['texte', 'image', 'video', 'code', 'site', 'jeu', 'audio', 'analyse'];
+document.querySelectorAll('.cap').forEach((card, i) => {
+  const key = CAP_ORDER[i];
+  const hint = document.createElement('span');
+  hint.className = 'cap__try';
+  hint.textContent = '▶ Essayer';
+  card.appendChild(hint);
+  card.addEventListener('click', () => {
+    openModal('play');
+    currentCap = key;
+    playCapsEl.querySelectorAll('.chip').forEach((c, j) => c.classList.toggle('is-playing', CAP_ORDER[j] === key));
+  });
+});
+
+/* générateur pseudo-aléatoire déterministe, semé par le prompt */
+function seededRng(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return () => {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return ((h ^= h >>> 16) >>> 0) / 4294967296;
+  };
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const playOut = document.getElementById('playOut');
+const playPrompt = document.getElementById('playPrompt');
+const playGo = document.getElementById('playGo');
+
+async function pipeline(lines) {
+  for (const line of lines) {
+    const p = document.createElement('p');
+    p.className = 'play__pipe';
+    p.innerHTML = `⚙ ${line}…`;
+    playOut.appendChild(p);
+    await sleep(340 + Math.random() * 420);
+    p.innerHTML = `<b>✓</b> ${line}`;
+  }
+}
+
+function typewriter(el, text, speed = 14) {
+  return new Promise((resolve) => {
+    let i = 0;
+    const iv = setInterval(() => {
+      el.textContent = text.slice(0, ++i);
+      if (i >= text.length) { clearInterval(iv); resolve(); }
+    }, speed);
+  });
+}
+
+function drawArt(prompt, rng) {
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 360;
+  c.className = 'play__canvas';
+  const ctx = c.getContext('2d');
+  const palette = ['#8b5cf6', '#22d3ee', '#e879f9', '#f2f0fa', '#4c1d95'];
+  const bg = ctx.createLinearGradient(0, 0, 640, 360);
+  bg.addColorStop(0, '#0b0818'); bg.addColorStop(1, '#120e24');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, 640, 360);
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 42; i++) {
+    const x = rng() * 640, y = rng() * 360, r = 12 + rng() * 110;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const col = palette[Math.floor(rng() * palette.length)];
+    g.addColorStop(0, col + '55'); g.addColorStop(1, col + '00');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < 26; i++) {
+    ctx.strokeStyle = palette[Math.floor(rng() * 3)] + '99';
+    ctx.lineWidth = 0.5 + rng() * 2;
+    ctx.beginPath();
+    ctx.moveTo(rng() * 640, rng() * 360);
+    ctx.bezierCurveTo(rng() * 640, rng() * 360, rng() * 640, rng() * 360, rng() * 640, rng() * 360);
+    ctx.stroke();
+  }
+  return c;
+}
+
+function playMelody(rng, eqBars) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  const scale = [0, 3, 5, 7, 10, 12, 15, 17, 19];
+  const base = 196 * Math.pow(2, Math.floor(rng() * 2));
+  const master = ctx.createGain();
+  master.gain.value = 0.22;
+  master.connect(ctx.destination);
+  const n = 16, step = 0.21;
+  for (let i = 0; i < n; i++) {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = i % 4 === 0 ? 'sawtooth' : 'triangle';
+    osc.frequency.value = base * Math.pow(2, scale[Math.floor(rng() * scale.length)] / 12);
+    const t0 = ctx.currentTime + i * step;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.8, t0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + step * 1.8);
+    osc.connect(g); g.connect(master);
+    osc.start(t0); osc.stop(t0 + step * 2);
+  }
+  /* petit égaliseur qui gigote pendant la lecture */
+  const eqTl = gsap.timeline();
+  eqBars.forEach((bar) => {
+    eqTl.to(bar, {
+      height: () => 8 + rng() * 64, duration: 0.14, repeat: Math.ceil((n * step) / 0.14), yoyo: true,
+      repeatRefresh: true, ease: 'sine.inOut',
+    }, 0);
+  });
+  eqTl.eventCallback('onComplete', () => gsap.to(eqBars, { height: 6, duration: 0.4 }));
+  setTimeout(() => ctx.close(), (n * step + 1) * 1000);
+  return n * step;
+}
+
+function slugify(s) {
+  return (s || 'ma-fonction').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'ma-fonction';
+}
+
+let generating = false;
+async function generate() {
+  if (generating) return;
+  const prompt = playPrompt.value.trim() || 'quelque chose de beau';
+  const cfg = PLAY_CAPS[currentCap];
+  const rng = seededRng(prompt + currentCap);
+  generating = true;
+  playGo.disabled = true;
+  playGo.querySelector('span').textContent = 'Génération…';
+  playOut.innerHTML = '';
+
+  await pipeline([`Chargement de <b>${cfg.model}</b>`, 'Inférence locale (démo navigateur)']);
+
+  if (cfg.type === 'text') {
+    const el = document.createElement('p');
+    el.className = 'play__text';
+    playOut.appendChild(el);
+    const intro = currentCap === 'analyse'
+      ? `Analyse de « ${prompt} » — trois signaux ressortent.\n\n1. La tendance de fond est claire et mesurable sur les données fournies.\n2. Deux segments se détachent nettement ; le troisième mérite un test dédié.\n3. Recommandation : commencer petit, instrumenter, itérer chaque semaine.\n\n(Sortie de démonstration générée localement — branchez vos vraies données pour la version complète.)`
+      : `« ${prompt} », donc. Voici une première proposition.\n\nIl y a mille façons d'en parler, mais la meilleure tient en une idée simple : montrer plutôt que promettre. Un paragraphe qui pose le décor, une phrase qui accroche, et une chute qui donne envie de cliquer.\n\n(Sortie de démonstration générée localement — la version complète branche un vrai LLM open source.)`;
+    await typewriter(el, intro, 11);
+  }
+
+  if (cfg.type === 'code') {
+    const el = document.createElement('code');
+    el.className = 'play__code';
+    playOut.appendChild(el);
+    const fn = slugify(prompt).replace(/-/g, '_');
+    await typewriter(el,
+`// ${prompt}
+export function ${fn}(entree) {
+  const etapes = ['analyser', 'transformer', 'valider'];
+  return etapes.reduce(
+    (acc, etape) => appliquer(etape, acc),
+    entree,
+  );
+}
+
+// Démo générée localement — la version complète
+// branche DeepSeek Coder sur votre dépôt.`, 8);
+  }
+
+  if (cfg.type === 'image') {
+    const canvas = drawArt(prompt, rng);
+    playOut.appendChild(canvas);
+    gsap.from(canvas, { opacity: 0, scale: 0.94, duration: 0.7, ease: 'power3.out' });
+    const meta = document.createElement('p');
+    meta.className = 'play__meta';
+    meta.textContent = `${cfg.model} · « ${prompt} » · 640 × 360 · art procédural de démo, généré dans votre navigateur`;
+    playOut.appendChild(meta);
+  }
+
+  if (cfg.type === 'audio') {
+    const eq = document.createElement('div');
+    eq.className = 'play__eq';
+    for (let i = 0; i < 28; i++) eq.appendChild(document.createElement('span'));
+    playOut.appendChild(eq);
+    const bars = [...eq.children];
+    playMelody(rng, bars);
+    const meta = document.createElement('p');
+    meta.className = 'play__meta';
+    meta.textContent = `${cfg.model} · mélodie synthétisée en direct par la Web Audio API, semée par votre prompt`;
+    playOut.appendChild(meta);
+    const replay = document.createElement('button');
+    replay.className = 'chip play__replay';
+    replay.textContent = '↻ Rejouer';
+    replay.addEventListener('click', () => playMelody(seededRng(prompt + currentCap), bars));
+    playOut.appendChild(replay);
+  }
+
+  if (cfg.type === 'steps') {
+    const extra = {
+      video: ['Storyboard (4 plans)', 'Génération des images clés', 'Interpolation 24 i/s', 'Encodage h264'],
+      site: ['Arborescence & contenu', 'Design system (3 variantes)', 'Intégration responsive', 'Déploiement de prévisualisation'],
+      jeu: ['Maillage 3D depuis le prompt', 'Textures PBR', 'Rig & colliders', 'Export glTF'],
+    }[currentCap];
+    await pipeline(extra);
+    const el = document.createElement('p');
+    el.className = 'play__text';
+    playOut.appendChild(el);
+    const outros = {
+      video: `🎬 Clip « ${prompt} » prêt : 6 s, 24 i/s, 1280×720.\nDans la vraie plateforme, le fichier apparaît ici avec sa timeline éditable.`,
+      site: `🌐 Prévisualisation de « ${prompt} » déployée sur https://demo.lumen-ia.fr/${slugify(prompt)}\nDans la vraie plateforme, ce lien est cliquable et le site éditable en langage naturel.`,
+      jeu: `🎮 Modèle 3D « ${prompt} » exporté en glTF (12 400 triangles, PBR).\nDans la vraie plateforme, il se charge ici même, manipulable comme le robot du hero.`,
+    };
+    await typewriter(el, outros[currentCap], 12);
+  }
+
+  playGo.disabled = false;
+  playGo.querySelector('span').textContent = 'Générer';
+  generating = false;
+  playEmote('ThumbsUp', true);
+}
+playGo.addEventListener('click', generate);
+playPrompt.addEventListener('keydown', (e) => { if (e.key === 'Enter') generate(); });
