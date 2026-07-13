@@ -90,7 +90,7 @@ const heroCamera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
 heroCamera.position.set(0, 0.55, 6.4);
 
 /* lumières colorées — leurs teintes tournent en continu */
-const spotA = new THREE.SpotLight(0x8b5cf6, 260, 40, Math.PI / 5, 0.5, 1.8);
+const spotA = new THREE.SpotLight(0x8b5cf6, 130, 40, Math.PI / 5, 0.5, 1.8);
 spotA.position.set(5, 7, 4);
 spotA.castShadow = true;
 spotA.shadow.mapSize.set(1024, 1024);
@@ -98,14 +98,19 @@ spotA.shadow.bias = -0.0002;
 spotA.shadow.radius = 5;
 heroScene.add(spotA);
 
-const spotB = new THREE.SpotLight(0x22d3ee, 200, 40, Math.PI / 4.5, 0.6, 1.8);
+const spotB = new THREE.SpotLight(0x22d3ee, 110, 40, Math.PI / 4.5, 0.6, 1.8);
 spotB.position.set(-6, 5, 3);
 heroScene.add(spotB);
 
-const rimLight = new THREE.PointLight(0xe879f9, 60, 25, 1.7);
+const rimLight = new THREE.PointLight(0xe879f9, 38, 25, 1.7);
 rimLight.position.set(0, 2.2, -3.5);
 heroScene.add(rimLight);
-heroScene.add(new THREE.AmbientLight(0x201a38, 3));
+heroScene.add(new THREE.AmbientLight(0x181430, 2.4));
+
+/* lueur rouge sourde au sol — l'androïde a quelque chose d'un peu trop calme */
+const underGlow = new THREE.PointLight(0xff2244, 6, 6, 2);
+underGlow.position.set(0, FLOOR_Y + 0.3, 1.4);
+heroScene.add(underGlow);
 
 /* sol brillant qui attrape les reflets colorés */
 const floor = new THREE.Mesh(
@@ -146,7 +151,7 @@ function makeComposer(renderer, scene, camera, strength, radius, threshold) {
   composer.addPass(new OutputPass());
   return { composer, bloom };
 }
-const heroFX = makeComposer(heroRenderer, heroScene, heroCamera, 0.55, 0.7, 0.82);
+const heroFX = makeComposer(heroRenderer, heroScene, heroCamera, 0.38, 0.7, 0.9);
 
 const robotGroup = new THREE.Group();
 heroScene.add(robotGroup);
@@ -154,8 +159,11 @@ heroScene.add(robotGroup);
 let mixer = null;
 const actions = {};
 let activeAction = null;
-const EMOTES = ['Wave', 'Dance', 'ThumbsUp', 'Jump', 'Yes', 'No', 'Punch'];
+const ADDITIVE_ANIMS = ['agree', 'headShake'];   // hochements joués PAR-DESSUS la pose de base
+const BASE_TIMED = ['walk', 'run'];              // locomotion temporaire, retour à idle ensuite
+const EMOTES = ['agree', 'headShake', 'gaze'];
 let robotReady = false;
+let baseTimer = null;
 
 /* ─── personnalité ─── */
 let headBone = null, faceMesh = null;
@@ -183,21 +191,20 @@ function setFace(name, intensity = 1, duration = 1.1) {
 }
 
 const EMOTE_FX = {
-  Wave:     { say: 'Salut toi 👋',                    face: 'Surprised' },
-  Dance:    { say: 'Monte le son 🎶',                 face: 'Surprised' },
-  ThumbsUp: { say: 'Validé, chef.',                   face: null },
-  Jump:     { say: 'Wouhouuu !',                      face: 'Surprised' },
-  No:       { say: 'Hmm… non. On peut mieux faire.',  face: 'Angry' },
-  Yes:      { say: 'Carrément.',                      face: null },
-  Punch:    { say: 'Bug écrasé 🐛',                   face: 'Angry' },
+  agree:     { say: 'Requête approuvée.' },
+  headShake: { say: 'Négatif.' },
+  walk:      { say: 'Je peux marcher des heures. Je ne fatigue jamais.' },
+  run:       { say: 'Accélération.' },
+  gaze:      { say: 'Je te vois. 👁' },
 };
 
 const IDLE_PHRASES = [
-  'On crée quoi aujourd’hui ?',
-  'Psst… clique sur « Essayer en direct ».',
-  '126 modèles dans le ventre, quand même.',
+  'J’apprends de chaque mouvement de ta souris.',
+  'Humain détecté. Sois le bienvenu.',
+  '126 modèles. Aucun ne dort jamais.',
+  'Je ne cligne pas des yeux. Jamais.',
+  'Pose-moi une question dans le playground.',
   'Tout open source. Fouille, je n’ai rien à cacher.',
-  'Je peux danser aussi, tu sais.',
 ];
 
 function fadeToAction(name, duration = 0.35) {
@@ -210,26 +217,41 @@ function fadeToAction(name, duration = 0.35) {
 }
 
 function playEmote(name, quiet = false) {
-  if (!robotReady || !actions[name]) return;
-  fadeToAction(name, 0.25);
+  if (!robotReady) return;
   const fx = EMOTE_FX[name];
-  if (fx && !quiet) {
-    if (fx.say) say(fx.say);
-    if (fx.face) setFace(fx.face, 1, 0.9);
+  if (fx && !quiet && fx.say) say(fx.say);
+
+  if (name === 'gaze') {
+    /* il se fige et te fixe droit dans les yeux */
+    gsap.to(headLook, { ox: 0, oy: -0.12, duration: 0.25 });
+    gsap.to(robotGroup.rotation, { y: 0, duration: 0.8, ease: 'power3.out' });
+    return;
   }
+  if (ADDITIVE_ANIMS.includes(name)) {
+    /* hochement additif par-dessus la pose courante */
+    const a = actions[name];
+    if (a) a.reset().setEffectiveWeight(1).fadeIn(0.15).play();
+    return;
+  }
+  if (BASE_TIMED.includes(name)) {
+    fadeToAction(name, 0.3);
+    clearTimeout(baseTimer);
+    baseTimer = setTimeout(() => fadeToAction('idle', 0.45), name === 'run' ? 2600 : 3600);
+    return;
+  }
+  if (actions[name]) fadeToAction(name, 0.25);
 }
 
 /* petites impulsions de vie quand il ne se passe rien */
 function idleLife() {
   const delay = 6000 + Math.random() * 8000;
   setTimeout(() => {
-    if (robotReady && heroVisible && activeAction === actions.Idle && !document.getElementById('modal').classList.contains('is-open')) {
+    if (robotReady && heroVisible && activeAction === actions.idle && !document.getElementById('modal').classList.contains('is-open')) {
       const roll = Math.random();
       if (roll < 0.3) {
-        playEmote('Yes', true);
+        playEmote('agree', true);
       } else if (roll < 0.45) {
-        playEmote('Wave', true);
-        say('👋');
+        playEmote('headShake', true);
       } else if (roll < 0.75) {
         say(IDLE_PHRASES[Math.floor(Math.random() * IDLE_PHRASES.length)], 3200);
       } else {
@@ -242,39 +264,58 @@ function idleLife() {
   }, delay);
 }
 
-loader.load('assets/models/RobotExpressive.glb',
+loader.load('assets/models/Xbot.glb',
   (gltf) => {
     const model = gltf.scene;
-    normalize(model, 3.1);
+    normalize(model, 3.15);
     robotGroup.add(model);
-    robotGroup.rotation.y = -0.35;
+    robotGroup.rotation.y = -0.3;
+
+    /* peau « acier froid » : moins jouet, plus androïde */
+    model.traverse((o) => {
+      if (o.isMesh && o.material) {
+        if (/HighLimbs|Surface/i.test(o.material.name || '')) {
+          o.material.color.set(0x9aa8bd);
+          o.material.metalness = 0.75;
+          o.material.roughness = 0.32;
+        } else {
+          o.material.color.set(0x14121f);
+          o.material.metalness = 0.6;
+          o.material.roughness = 0.5;
+        }
+        o.material.envMapIntensity = 0.9;
+      }
+    });
 
     mixer = new THREE.AnimationMixer(model);
     gltf.animations.forEach((clip) => {
-      const action = mixer.clipAction(clip);
-      actions[clip.name] = action;
-      if (EMOTES.includes(clip.name) || clip.name === 'Death' || clip.name === 'Standing') {
-        action.clampWhenFinished = true;
+      if (ADDITIVE_ANIMS.includes(clip.name)) {
+        /* hochements convertis en clips additifs : ils se superposent à l'idle */
+        const add = THREE.AnimationUtils.makeClipAdditive(clip);
+        const action = mixer.clipAction(add);
         action.loop = THREE.LoopOnce;
+        actions[clip.name] = action;
+      } else {
+        actions[clip.name] = mixer.clipAction(clip);
       }
     });
-    mixer.addEventListener('finished', () => fadeToAction('Idle', 0.4));
-
-    /* os de la tête (suit le curseur) + visage à morph targets (mimiques) */
-    model.traverse((o) => {
-      if (o.isBone && o.name === 'Head' && !headBone) headBone = o;
-      if (o.morphTargetDictionary && o.morphTargetDictionary.Surprised !== undefined) faceMesh = o;
+    mixer.addEventListener('finished', (e) => {
+      if (ADDITIVE_ANIMS.includes(e.action.getClip().name)) e.action.fadeOut(0.3);
     });
 
-    fadeToAction('Idle', 0);
+    /* os de la tête : il suit le curseur du regard */
+    model.traverse((o) => {
+      if (o.isBone && /Head$/.test(o.name) && !headBone) headBone = o;
+    });
+
+    fadeToAction('idle', 0);
     robotReady = true;
     finishPreloader();
-    /* petit salut de bienvenue une fois le rideau levé */
-    setTimeout(() => { playEmote('Wave', true); say('Bienvenue chez LUMEN ✨', 3000); }, 1400);
+    setTimeout(() => { playEmote('agree', true); say('Humain détecté. Bienvenue chez LUMEN.', 3200); }, 1400);
     idleLife();
   },
   (e) => { if (e.total) progress.real = Math.max(progress.real, (e.loaded / e.total) * 95); },
-  (err) => { console.error('Robot introuvable', err); finishPreloader(); }
+  (err) => { console.error('Androïde introuvable', err); finishPreloader(); }
 );
 
 function layoutHero() {
@@ -321,9 +362,8 @@ heroCanvas.addEventListener('click', (e) => {
   ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, heroCamera);
   if (raycaster.intersectObjects(robotGroup.children, true).length) {
-    setFace('Surprised', 1, 0.4);
     playEmote(EMOTES[Math.floor(Math.random() * EMOTES.length)]);
-    gsap.fromTo(heroFX.bloom, { strength: 0.55 }, { strength: 1.15, duration: 0.25, yoyo: true, repeat: 1, ease: 'power2.out' });
+    gsap.fromTo(heroFX.bloom, { strength: 0.38 }, { strength: 0.85, duration: 0.25, yoyo: true, repeat: 1, ease: 'power2.out' });
   }
 });
 
@@ -334,7 +374,7 @@ document.querySelectorAll('.chip[data-emote]').forEach((chip) => {
     document.querySelectorAll('.chip').forEach((c) => c.classList.remove('is-playing'));
     chip.classList.add('is-playing');
     setTimeout(() => chip.classList.remove('is-playing'), 1600);
-    gsap.fromTo(heroFX.bloom, { strength: 0.55 }, { strength: 1.05, duration: 0.3, yoyo: true, repeat: 1, ease: 'power2.out' });
+    gsap.fromTo(heroFX.bloom, { strength: 0.38 }, { strength: 0.8, duration: 0.3, yoyo: true, repeat: 1, ease: 'power2.out' });
   });
 });
 
@@ -451,10 +491,11 @@ function tick() {
         }
       }
     }
-    /* les teintes des projecteurs dérivent lentement */
-    spotA.color.setHSL((0.75 + t * 0.012) % 1, 0.75, 0.6);
-    spotB.color.setHSL((0.52 + t * 0.017) % 1, 0.8, 0.6);
-    rimLight.intensity = 60 + Math.sin(t * 1.4) * 22;
+    /* teintes froides qui dérivent lentement, respiration rouge au sol */
+    spotA.color.setHSL(0.68 + Math.sin(t * 0.06) * 0.06, 0.7, 0.58);
+    spotB.color.setHSL(0.54 + Math.sin(t * 0.09 + 2) * 0.05, 0.8, 0.6);
+    rimLight.intensity = 36 + Math.sin(t * 1.4) * 12;
+    underGlow.intensity = 5 + Math.sin(t * 2.1) * 2.5;
     particlesA.rotation.y = t * 0.02;
     particlesB.rotation.y = -t * 0.014;
     heroFX.composer.render();
@@ -715,7 +756,7 @@ signupForm.addEventListener('submit', (e) => {
     showToast(`✓ Compte ${currentPlan} créé — bienvenue !`);
     submitBtn.disabled = false;
     submitBtn.querySelector('span').textContent = 'Créer mon compte';
-    playEmote('ThumbsUp', true);
+    playEmote('agree', true);
   }, 900);
 });
 
@@ -957,7 +998,7 @@ export function ${fn}(entree) {
   playGo.disabled = false;
   playGo.querySelector('span').textContent = 'Générer';
   generating = false;
-  playEmote('ThumbsUp', true);
+  playEmote('agree', true);
 }
 playGo.addEventListener('click', generate);
 playPrompt.addEventListener('keydown', (e) => { if (e.key === 'Enter') generate(); });

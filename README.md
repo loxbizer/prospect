@@ -1,7 +1,7 @@
 # Deux sites de démonstration
 
 - **`/` (racine) — ÉLOGE** : maison de mobilier d'exception (ci-dessous).
-- **`/lumen/` — LUMEN** : plateforme IA open source. Robot GLB animé (vraies animations
+- **`/lumen/` — LUMEN** : plateforme IA open source. Androïde humanoïde GLB animé (vraies animations
   squelettiques, il danse au clic), dragon de verre piloté au scroll, bloom WebGL,
   lumières colorées animées, particules, aurora, tarifs. Voir `lumen/`.
 
