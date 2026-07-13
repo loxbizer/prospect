@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ÉLOGE — Maison de mobilier d'exception</title>
+  <meta name="description" content="ÉLOGE crée des pièces de mobilier d'exception, dessinées et fabriquées en France. Canapés, fauteuils et assises sur mesure.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Manrope:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>É</text></svg>">
+</head>
+<body>
+
+  <!-- ══════════ PRELOADER ══════════ -->
+  <div class="preloader" id="preloader">
+    <div class="preloader__inner">
+      <span class="preloader__logo">ÉLOGE</span>
+      <span class="preloader__count" id="preloaderCount">0</span>
+      <div class="preloader__bar"><span id="preloaderBar"></span></div>
+    </div>
+  </div>
+
+  <!-- ══════════ CURSEUR PERSONNALISÉ ══════════ -->
+  <div class="cursor" id="cursor"></div>
+  <div class="cursor-follower" id="cursorFollower"><span id="cursorLabel"></span></div>
+
+  <!-- ══════════ NAVIGATION ══════════ -->
+  <header class="nav" id="nav">
+    <a href="#hero" class="nav__logo magnetic" data-cursor="hover">ÉLOGE</a>
+    <nav class="nav__links">
+      <a href="#collections" class="nav__link magnetic" data-cursor="hover">Collections</a>
+      <a href="#atelier3d" class="nav__link magnetic" data-cursor="hover">Atelier&nbsp;3D</a>
+      <a href="#savoirfaire" class="nav__link magnetic" data-cursor="hover">Savoir-faire</a>
+      <a href="#contact" class="nav__cta magnetic" data-cursor="hover"><span>Prendre rendez-vous</span></a>
+    </nav>
+    <button class="nav__burger" id="burger" aria-label="Menu">
+      <span></span><span></span>
+    </button>
+  </header>
+
+  <!-- ══════════ MENU MOBILE ══════════ -->
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="#collections">Collections</a>
+    <a href="#atelier3d">Atelier 3D</a>
+    <a href="#savoirfaire">Savoir-faire</a>
+    <a href="#contact">Contact</a>
+  </div>
+
+  <main id="smooth-content">
+
+    <!-- ══════════ HERO 3D ══════════ -->
+    <section class="hero" id="hero">
+      <canvas id="heroCanvas" class="hero__canvas"></canvas>
+      <div class="hero__vignette"></div>
+      <div class="hero__content">
+        <p class="hero__eyebrow reveal-line"><span>Maison française · depuis 1994</span></p>
+        <h1 class="hero__title">
+          <span class="hero__line"><span>Le mobilier</span></span>
+          <span class="hero__line"><span>comme un</span></span>
+          <span class="hero__line hero__line--italic"><span>éloge du temps</span></span>
+        </h1>
+        <p class="hero__sub reveal-line"><span>Canapés, fauteuils et assises d'exception, dessinés à Paris,<br>façonnés à la main dans nos ateliers du Faubourg Saint-Antoine.</span></p>
+        <div class="hero__actions">
+          <a href="#atelier3d" class="btn btn--solid magnetic" data-cursor="hover"><span>Explorer en 3D</span></a>
+          <a href="#collections" class="btn btn--ghost magnetic" data-cursor="hover"><span>Nos collections</span></a>
+        </div>
+      </div>
+      <div class="hero__scroll-hint">
+        <span class="hero__scroll-text">Défiler pour découvrir</span>
+        <span class="hero__scroll-line"></span>
+      </div>
+      <div class="hero__frame hero__frame--tl"></div>
+      <div class="hero__frame hero__frame--br"></div>
+    </section>
+
+    <!-- ══════════ MARQUEE ══════════ -->
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee__track" id="marqueeTrack">
+        <span>Fait main en France&nbsp;·&nbsp;</span><span>Bois massif certifié&nbsp;·&nbsp;</span><span>Tissus des maisons lyonnaises&nbsp;·&nbsp;</span><span>Garantie 25 ans&nbsp;·&nbsp;</span>
+        <span>Fait main en France&nbsp;·&nbsp;</span><span>Bois massif certifié&nbsp;·&nbsp;</span><span>Tissus des maisons lyonnaises&nbsp;·&nbsp;</span><span>Garantie 25 ans&nbsp;·&nbsp;</span>
+      </div>
+    </div>
+
+    <!-- ══════════ MANIFESTE + CHIFFRES ══════════ -->
+    <section class="manifesto">
+      <p class="manifesto__text split-words">Chaque pièce ÉLOGE naît d'un dessin, d'une main, d'une matière. Nous ne fabriquons pas des meubles&nbsp;— nous composons des présences qui traversent les générations.</p>
+      <div class="stats">
+        <div class="stat"><span class="stat__num" data-count="31">0</span><span class="stat__label">années d'atelier</span></div>
+        <div class="stat"><span class="stat__num" data-count="4200">0</span><span class="stat__label">pièces façonnées</span></div>
+        <div class="stat"><span class="stat__num" data-count="27">0</span><span class="stat__label">artisans &amp; compagnons</span></div>
+        <div class="stat"><span class="stat__num" data-count="9">0</span><span class="stat__label">showrooms en Europe</span></div>
+      </div>
+    </section>
+
+    <!-- ══════════ COLLECTIONS ══════════ -->
+    <section class="collections" id="collections">
+      <div class="section-head">
+        <span class="section-head__index">01</span>
+        <h2 class="section-head__title split-words">Les collections</h2>
+        <p class="section-head__sub">Trois lignes, une même exigence&nbsp;: la justesse.</p>
+      </div>
+
+      <div class="collections__grid">
+        <article class="card card--tall" data-cursor="view">
+          <div class="card__media">
+            <img src="https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=1400&q=80&auto=format&fit=crop" alt="Canapé Rive Gauche en velours" loading="lazy">
+          </div>
+          <div class="card__body">
+            <span class="card__index">Collection I</span>
+            <h3 class="card__title">Rive&nbsp;Gauche</h3>
+            <p class="card__desc">Canapés en velours profond, structure hêtre massif, assise plume et mousse HR.</p>
+            <span class="card__link">Découvrir <i>→</i></span>
+          </div>
+        </article>
+
+        <article class="card" data-cursor="view">
+          <div class="card__media">
+            <img src="https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1400&q=80&auto=format&fit=crop" alt="Fauteuil Solstice dans un intérieur lumineux" loading="lazy">
+          </div>
+          <div class="card__body">
+            <span class="card__index">Collection II</span>
+            <h3 class="card__title">Solstice</h3>
+            <p class="card__desc">Fauteuils sculpturaux, courbes généreuses, laines bouclées et lin lavé.</p>
+            <span class="card__link">Découvrir <i>→</i></span>
+          </div>
+        </article>
+
+        <article class="card" data-cursor="view">
+          <div class="card__media">
+            <img src="https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?w=1400&q=80&auto=format&fit=crop" alt="Fauteuil Héritage en cuir" loading="lazy">
+          </div>
+          <div class="card__body">
+            <span class="card__index">Collection III</span>
+            <h3 class="card__title">Héritage</h3>
+            <p class="card__desc">Pièces d'apparat, damas tissés, dorures à la feuille&nbsp;— l'esprit des grandes maisons.</p>
+            <span class="card__link">Découvrir <i>→</i></span>
+          </div>
+        </article>
+
+        <article class="card card--wide" data-cursor="view">
+          <div class="card__media">
+            <img src="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=1800&q=80&auto=format&fit=crop" alt="Salon composé de pièces ÉLOGE" loading="lazy">
+          </div>
+          <div class="card__body">
+            <span class="card__index">Sur mesure</span>
+            <h3 class="card__title">Projets d'ensemble</h3>
+            <p class="card__desc">Architectes et décorateurs&nbsp;: nous composons des ensembles complets, du dessin à la pose.</p>
+            <span class="card__link">Parler de votre projet <i>→</i></span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ══════════ ATELIER 3D INTERACTIF ══════════ -->
+    <section class="atelier3d" id="atelier3d">
+      <div class="section-head section-head--light">
+        <span class="section-head__index">02</span>
+        <h2 class="section-head__title split-words">L'atelier 3D</h2>
+        <p class="section-head__sub">Manipulez nos pièces. Faites-les tourner, changez les matières&nbsp;— comme au showroom.</p>
+      </div>
+
+      <div class="atelier3d__stage">
+        <canvas id="atelierCanvas"></canvas>
+        <div class="atelier3d__hint" id="atelierHint"><span>◦ Cliquer-glisser pour faire tourner · cliquer sur la pièce pour l'animer</span></div>
+        <div class="atelier3d__loading" id="atelierLoading"><span></span></div>
+      </div>
+
+      <div class="atelier3d__controls">
+        <div class="atelier3d__models" id="modelSwitcher">
+          <button class="model-btn is-active" data-model="sofa" data-cursor="hover">
+            <span class="model-btn__num">01</span>
+            <span class="model-btn__name">Canapé Palatine</span>
+            <span class="model-btn__meta">Velours · L 220 cm</span>
+          </button>
+          <button class="model-btn" data-model="chair" data-cursor="hover">
+            <span class="model-btn__num">02</span>
+            <span class="model-btn__name">Fauteuil Auguste</span>
+            <span class="model-btn__meta">Laine bouclée · sheen</span>
+          </button>
+          <button class="model-btn" data-model="damask" data-cursor="hover">
+            <span class="model-btn__num">03</span>
+            <span class="model-btn__name">Chauffeuse Damas</span>
+            <span class="model-btn__meta">Damas pourpre &amp; or</span>
+          </button>
+        </div>
+        <div class="atelier3d__variants" id="variantSwitcher">
+          <span class="atelier3d__variants-label">Matières&nbsp;:</span>
+          <div class="atelier3d__variants-list" id="variantList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ SAVOIR-FAIRE ══════════ -->
+    <section class="savoirfaire" id="savoirfaire">
+      <div class="section-head">
+        <span class="section-head__index">03</span>
+        <h2 class="section-head__title split-words">Le savoir-faire</h2>
+        <p class="section-head__sub">Quatre-vingt-quatre gestes. Aucun raccourci.</p>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step__media parallax-img">
+            <img src="https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=1600&q=80&auto=format&fit=crop" alt="Bois massif sélectionné à l'atelier" loading="lazy">
+          </div>
+          <div class="step__text">
+            <span class="step__num">Étape 01</span>
+            <h3>La structure</h3>
+            <p>Hêtre et chêne massifs, séchés trois ans, assemblés en tenons-mortaises chevillés. Aucune agrafe, aucune vis apparente. La carcasse d'un canapé ÉLOGE est garantie vingt-cinq ans.</p>
+          </div>
+        </div>
+        <div class="step step--reverse">
+          <div class="step__media parallax-img">
+            <img src="https://images.unsplash.com/photo-1615873968403-89e068629265?w=1600&q=80&auto=format&fit=crop" alt="Garnissage et tissus dans l'atelier" loading="lazy">
+          </div>
+          <div class="step__text">
+            <span class="step__num">Étape 02</span>
+            <h3>La garniture</h3>
+            <p>Sanglage main, ressorts noués huit points, crin végétal et plume française. Le confort ne se voit pas&nbsp;: il se construit, couche après couche, sous la main du garnisseur.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step__media parallax-img">
+            <img src="https://images.unsplash.com/photo-1538688525198-9b88f6f53126?w=1600&q=80&auto=format&fit=crop" alt="Pièce finie dans un intérieur" loading="lazy">
+          </div>
+          <div class="step__text">
+            <span class="step__num">Étape 03</span>
+            <h3>La couture &amp; la finition</h3>
+            <p>Velours de Lyon, damas tissés sur métiers anciens, cuirs pleine fleur. Chaque pièce est coupée, cousue et signée par un seul artisan, de la première épingle au dernier point.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ TÉMOIGNAGES ══════════ -->
+    <section class="quotes">
+      <div class="quotes__viewport">
+        <div class="quote is-active">
+          <p class="quote__text">«&nbsp;Nous avons confié à ÉLOGE l'ensemble des assises du palace. Trois ans plus tard, elles semblent neuves&nbsp;— et les clients demandent où les acheter.&nbsp;»</p>
+          <div class="quote__author">
+            <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80&auto=format&fit=crop" alt="Portrait de Claire Vasseur" loading="lazy">
+            <div><strong>Claire Vasseur</strong><span>Directrice artistique, Hôtel Meridiana</span></div>
+          </div>
+        </div>
+        <div class="quote">
+          <p class="quote__text">«&nbsp;Le seul atelier capable de suivre un dessin au millimètre sans jamais perdre l'âme du geste. Un partenaire, pas un fournisseur.&nbsp;»</p>
+          <div class="quote__author">
+            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&q=80&auto=format&fit=crop" alt="Portrait d'Adrien Malet" loading="lazy">
+            <div><strong>Adrien Malet</strong><span>Architecte d'intérieur, Studio Malet</span></div>
+          </div>
+        </div>
+        <div class="quote">
+          <p class="quote__text">«&nbsp;J'ai hérité du fauteuil Auguste de ma grand-mère. ÉLOGE l'a regarni à l'identique&nbsp;— même les clous sont d'époque. C'est ça, une maison.&nbsp;»</p>
+          <div class="quote__author">
+            <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&q=80&auto=format&fit=crop" alt="Portrait de Thomas Reygner" loading="lazy">
+            <div><strong>Thomas Reygner</strong><span>Client particulier, Bordeaux</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="quotes__nav">
+        <button class="quotes__arrow" id="quotePrev" data-cursor="hover" aria-label="Témoignage précédent">←</button>
+        <span class="quotes__count"><b id="quoteIndex">01</b>&nbsp;/&nbsp;03</span>
+        <button class="quotes__arrow" id="quoteNext" data-cursor="hover" aria-label="Témoignage suivant">→</button>
+      </div>
+    </section>
+
+    <!-- ══════════ CTA ══════════ -->
+    <section class="cta" id="contact">
+      <div class="cta__bg parallax-img">
+        <img src="https://images.unsplash.com/photo-1567016432779-094069958ea5?w=2000&q=80&auto=format&fit=crop" alt="Intérieur signé ÉLOGE" loading="lazy">
+      </div>
+      <div class="cta__content">
+        <h2 class="split-words">Votre pièce vous attend déjà.<br><em>Elle n'a pas encore de forme.</em></h2>
+        <a href="mailto:atelier@maison-eloge.fr" class="btn btn--solid btn--big magnetic" data-cursor="hover"><span>Prendre rendez-vous à l'atelier</span></a>
+        <p class="cta__meta">Showroom Paris — 14 rue de Charonne, 75011 · du mardi au samedi, 10h–19h</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══════════ FOOTER ══════════ -->
+  <footer class="footer">
+    <div class="footer__top">
+      <span class="footer__logo">ÉLOGE</span>
+      <div class="footer__cols">
+        <div>
+          <h4>Maison</h4>
+          <a href="#collections">Collections</a>
+          <a href="#atelier3d">Atelier 3D</a>
+          <a href="#savoirfaire">Savoir-faire</a>
+        </div>
+        <div>
+          <h4>Contact</h4>
+          <a href="mailto:atelier@maison-eloge.fr">atelier@maison-eloge.fr</a>
+          <a href="tel:+33142000000">+33 1 42 00 00 00</a>
+          <span>14 rue de Charonne, Paris XI<sup>e</sup></span>
+        </div>
+        <div>
+          <h4>Suivre</h4>
+          <a href="#" data-cursor="hover">Instagram</a>
+          <a href="#" data-cursor="hover">Pinterest</a>
+          <a href="#" data-cursor="hover">Journal</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <span>© 2026 Maison ÉLOGE — site de démonstration.</span>
+      <span class="footer__credits">Modèles 3D&nbsp;: Eric Chadwick / Wayfair (CC0 &amp; CC-BY 4.0, bibliothèque Khronos glTF Sample Assets) · Photographies&nbsp;: Unsplash</span>
+    </div>
+  </footer>
+
+  <script src="js/vendor/gsap.min.js"></script>
+  <script src="js/vendor/ScrollTrigger.min.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "./js/vendor/three.module.js" } }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
