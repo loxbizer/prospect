@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LUMEN — Tout ce que l'IA sait faire. Open source. Gratuit.</title>
+  <meta name="description" content="LUMEN réunit les meilleurs modèles d'IA open source : texte, image, vidéo, code, sites, jeux 3D, audio, analyse. Une seule plateforme, gratuite pour commencer.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
+</head>
+<body>
+
+  <!-- ══════════ PRELOADER ══════════ -->
+  <div class="preloader" id="preloader">
+    <div class="preloader__inner">
+      <div class="preloader__logo"><span class="gem">◆</span> LUMEN</div>
+      <div class="preloader__count" id="preloaderCount">0 %</div>
+      <div class="preloader__bar"><span id="preloaderBar"></span></div>
+      <div class="preloader__hint">réveil du robot…</div>
+    </div>
+  </div>
+
+  <!-- ══════════ FOND AURORA + GRAIN ══════════ -->
+  <div class="aurora" aria-hidden="true">
+    <div class="aurora__blob aurora__blob--1"></div>
+    <div class="aurora__blob aurora__blob--2"></div>
+    <div class="aurora__blob aurora__blob--3"></div>
+  </div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- ══════════ CURSEUR ══════════ -->
+  <div class="cursor" id="cursor"></div>
+  <div class="cursor-follower" id="cursorFollower"><span id="cursorLabel"></span></div>
+
+  <!-- ══════════ NAV ══════════ -->
+  <header class="nav" id="nav">
+    <a href="#hero" class="nav__logo magnetic" data-cursor="hover"><span class="gem">◆</span> LUMEN</a>
+    <nav class="nav__links">
+      <a href="#capacites" class="nav__link magnetic" data-cursor="hover">Capacités</a>
+      <a href="#moteur" class="nav__link magnetic" data-cursor="hover">Le moteur</a>
+      <a href="#tarifs" class="nav__link magnetic" data-cursor="hover">Tarifs</a>
+      <a href="#tarifs" class="nav__cta magnetic" data-cursor="hover"><span>Commencer — gratuit</span></a>
+    </nav>
+    <button class="nav__burger" id="burger" aria-label="Menu"><span></span><span></span></button>
+  </header>
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="#capacites">Capacités</a>
+    <a href="#moteur">Le moteur</a>
+    <a href="#tarifs">Tarifs</a>
+  </div>
+
+  <main>
+
+    <!-- ══════════ HERO 3D ══════════ -->
+    <section class="hero" id="hero">
+      <canvas id="heroCanvas" class="hero__canvas"></canvas>
+      <div class="hero__content">
+        <p class="hero__eyebrow reveal-line"><span>◆ 100 % open source · 0 € pour commencer</span></p>
+        <h1 class="hero__title">
+          <span class="hero__line"><span>Tout ce que</span></span>
+          <span class="hero__line"><span>l'IA <em class="grad">sait faire</em>.</span></span>
+          <span class="hero__line hero__line--small"><span>Au même endroit.</span></span>
+        </h1>
+        <p class="hero__sub reveal-line"><span>Texte, image, vidéo, code, sites, jeux 3D, audio, analyse —<br>propulsés par les meilleurs modèles ouverts, sans boîte noire.</span></p>
+        <div class="hero__actions">
+          <a href="#tarifs" class="btn btn--solid magnetic" data-cursor="hover"><span>Essayer gratuitement</span></a>
+          <a href="#capacites" class="btn btn--ghost magnetic" data-cursor="hover"><span>Voir les capacités</span></a>
+        </div>
+      </div>
+
+      <!-- pupitre d'animations du robot -->
+      <div class="hero__robot-deck" id="robotDeck">
+        <span class="hero__robot-label">Dites-lui quoi faire&nbsp;→</span>
+        <div class="hero__robot-btns">
+          <button class="chip" data-emote="Wave" data-cursor="hover">👋 Salue</button>
+          <button class="chip" data-emote="Dance" data-cursor="hover">🕺 Danse</button>
+          <button class="chip" data-emote="ThumbsUp" data-cursor="hover">👍 Approuve</button>
+          <button class="chip" data-emote="Jump" data-cursor="hover">⚡ Saute</button>
+          <button class="chip" data-emote="No" data-cursor="hover">🙅 Refuse</button>
+        </div>
+      </div>
+
+      <div class="hero__scroll-hint"><span>Défiler</span><i></i></div>
+    </section>
+
+    <!-- ══════════ MARQUEE MODÈLES ══════════ -->
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee__track" id="marqueeTrack">
+        <span>Llama&nbsp;3</span><b>◆</b><span>Mistral</span><b>◆</b><span>Stable&nbsp;Diffusion</span><b>◆</b><span>FLUX</span><b>◆</b><span>Whisper</span><b>◆</b><span>Qwen</span><b>◆</b><span>DeepSeek</span><b>◆</b><span>Bark</span><b>◆</b><span>MusicGen</span><b>◆</b><span>CodeLlama</span><b>◆</b>
+        <span>Llama&nbsp;3</span><b>◆</b><span>Mistral</span><b>◆</b><span>Stable&nbsp;Diffusion</span><b>◆</b><span>FLUX</span><b>◆</b><span>Whisper</span><b>◆</b><span>Qwen</span><b>◆</b><span>DeepSeek</span><b>◆</b><span>Bark</span><b>◆</b><span>MusicGen</span><b>◆</b><span>CodeLlama</span><b>◆</b>
+      </div>
+    </div>
+
+    <!-- ══════════ CAPACITÉS ══════════ -->
+    <section class="caps" id="capacites">
+      <div class="section-head">
+        <span class="section-head__index">01 / Capacités</span>
+        <h2 class="section-head__title split-words">Une IA. <em class="grad">Huit métiers.</em></h2>
+        <p class="section-head__sub">Chaque capacité s'appuie sur des modèles open source que vous pouvez auditer, répliquer, héberger.</p>
+      </div>
+      <div class="caps__grid">
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">✍️</div>
+          <h3>Texte &amp; conversation</h3>
+          <p>Rédaction, traduction, résumé, agents conversationnels.</p>
+          <span class="cap__models">Llama 3 · Mistral · Qwen</span>
+        </article>
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">🎨</div>
+          <h3>Images</h3>
+          <p>Génération, retouche, upscale, détourage, styles cohérents.</p>
+          <span class="cap__models">Stable Diffusion · FLUX</span>
+        </article>
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">🎬</div>
+          <h3>Vidéo</h3>
+          <p>Texte-vers-vidéo, animation d'images, interpolation, sous-titres.</p>
+          <span class="cap__models">Wan · Hunyuan Video · LTX</span>
+        </article>
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">⌨️</div>
+          <h3>Code</h3>
+          <p>Génération, revue, refactoring, tests — 40+ langages.</p>
+          <span class="cap__models">CodeLlama · DeepSeek Coder</span>
+        </article>
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">🌐</div>
+          <h3>Sites &amp; apps</h3>
+          <p>Du prompt au produit déployé : landing pages, apps, dashboards.</p>
+          <span class="cap__models">Agents LUMEN</span>
+        </article>
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">🎮</div>
+          <h3>Jeux &amp; 3D</h3>
+          <p>Prototypes jouables, assets 3D, textures, mondes procéduraux.</p>
+          <span class="cap__models">TripoSR · Zero123</span>
+        </article>
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">🎙️</div>
+          <h3>Audio &amp; voix</h3>
+          <p>Synthèse vocale, clonage éthique, musique, transcription.</p>
+          <span class="cap__models">Whisper · Bark · MusicGen</span>
+        </article>
+        <article class="cap tilt" data-cursor="hover">
+          <div class="cap__icon">📊</div>
+          <h3>Analyse</h3>
+          <p>Données, documents, tableaux — questions en langage naturel.</p>
+          <span class="cap__models">RAG · pandas-ai</span>
+        </article>
+      </div>
+    </section>
+
+    <!-- ══════════ LE MOTEUR (DRAGON 3D) ══════════ -->
+    <section class="engine" id="moteur">
+      <div class="engine__sticky">
+        <canvas id="dragonCanvas"></canvas>
+        <div class="engine__halo"></div>
+      </div>
+      <div class="engine__steps">
+        <div class="engine__step">
+          <span class="engine__num">02 / Le moteur</span>
+          <h2 class="split-words">Verre, lumière, <em class="grad">et 120+ modèles.</em></h2>
+          <p>Sous le capot, LUMEN orchestre plus de cent vingt modèles open source, mis à jour chaque semaine. Vous choisissez le résultat, il choisit le modèle.</p>
+        </div>
+        <div class="engine__step">
+          <h2 class="split-words">Aucune <em class="grad">boîte noire.</em></h2>
+          <p>Chaque génération indique le modèle utilisé, sa licence et son empreinte. Auditez tout, répliquez tout — les poids sont publics.</p>
+        </div>
+        <div class="engine__step">
+          <h2 class="split-words">Chez nous, <em class="grad">ou chez vous.</em></h2>
+          <p>Cloud LUMEN en un clic, ou auto-hébergement complet : la même plateforme tourne sur votre GPU. Vos données ne quittent jamais votre infrastructure.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ CHIFFRES ══════════ -->
+    <section class="stats-band">
+      <div class="stat"><span class="stat__num grad" data-count="126">0</span><span class="stat__label">modèles intégrés</span></div>
+      <div class="stat"><span class="stat__num grad" data-count="2400000">0</span><span class="stat__label">générations / mois</span></div>
+      <div class="stat"><span class="stat__num grad" data-count="100">0</span><span class="stat__label">% open source</span></div>
+      <div class="stat"><span class="stat__num grad" data-count="0">0</span><span class="stat__label">€ pour commencer</span></div>
+    </section>
+
+    <!-- ══════════ TARIFS ══════════ -->
+    <section class="pricing" id="tarifs">
+      <div class="section-head">
+        <span class="section-head__index">03 / Tarifs</span>
+        <h2 class="section-head__title split-words">Gratuit pour créer.<br><em class="grad">Payant pour accélérer.</em></h2>
+      </div>
+      <div class="pricing__grid">
+        <article class="plan tilt" data-cursor="hover">
+          <h3>Découverte</h3>
+          <div class="plan__price">0&nbsp;€<span>/ mois</span></div>
+          <ul>
+            <li>200 générations / mois</li>
+            <li>Toutes les capacités</li>
+            <li>File d'attente standard</li>
+            <li>Communauté Discord</li>
+          </ul>
+          <a href="#" class="btn btn--ghost magnetic" data-cursor="hover"><span>Créer un compte</span></a>
+        </article>
+        <article class="plan plan--hot tilt" data-cursor="hover">
+          <span class="plan__badge">Le plus choisi</span>
+          <h3>Pro</h3>
+          <div class="plan__price">19&nbsp;€<span>/ mois</span></div>
+          <ul>
+            <li>Générations illimitées*</li>
+            <li>GPU prioritaires (jusqu'à 8× plus rapide)</li>
+            <li>API &amp; automatisations</li>
+            <li>Historique &amp; projets illimités</li>
+          </ul>
+          <a href="#" class="btn btn--solid magnetic" data-cursor="hover"><span>Passer Pro</span></a>
+        </article>
+        <article class="plan tilt" data-cursor="hover">
+          <h3>Studio</h3>
+          <div class="plan__price">79&nbsp;€<span>/ mois</span></div>
+          <ul>
+            <li>5 sièges, espaces partagés</li>
+            <li>Auto-hébergement assisté</li>
+            <li>Modèles fine-tunés privés</li>
+            <li>Support prioritaire humain</li>
+          </ul>
+          <a href="#" class="btn btn--ghost magnetic" data-cursor="hover"><span>Contacter l'équipe</span></a>
+        </article>
+      </div>
+      <p class="pricing__note">* usage raisonnable — les détails dans nos CGU, écrites par des humains.</p>
+    </section>
+
+    <!-- ══════════ CTA FINAL ══════════ -->
+    <section class="cta">
+      <div class="cta__orb"></div>
+      <h2 class="split-words">La prochaine chose que vous créerez<br>commence par <em class="grad">un prompt.</em></h2>
+      <a href="#tarifs" class="btn btn--solid btn--big magnetic" data-cursor="hover"><span>◆ Lancer LUMEN — gratuit</span></a>
+      <p class="cta__meta">Sans carte bancaire. Sans installation. Sans boîte noire.</p>
+    </section>
+
+  </main>
+
+  <!-- ══════════ FOOTER ══════════ -->
+  <footer class="footer">
+    <div class="footer__top">
+      <span class="footer__logo"><span class="gem">◆</span> LUMEN</span>
+      <div class="footer__cols">
+        <div>
+          <h4>Produit</h4>
+          <a href="#capacites">Capacités</a>
+          <a href="#moteur">Le moteur</a>
+          <a href="#tarifs">Tarifs</a>
+        </div>
+        <div>
+          <h4>Open source</h4>
+          <a href="#" data-cursor="hover">GitHub</a>
+          <a href="#" data-cursor="hover">Poids des modèles</a>
+          <a href="#" data-cursor="hover">Licences</a>
+        </div>
+        <div>
+          <h4>Contact</h4>
+          <a href="mailto:bonjour@lumen-ia.fr">bonjour@lumen-ia.fr</a>
+          <a href="#" data-cursor="hover">Discord</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <span>© 2026 LUMEN — site de démonstration.</span>
+      <span class="footer__credits">3D&nbsp;: « RobotExpressive » Tomás Laulhé / Don McCurdy (CC0) · Dragon de Stanford (Stanford Computer Graphics Laboratory), conversion Morgan McGuire — bibliothèque Khronos glTF Sample Assets · three.js · GSAP</span>
+    </div>
+  </footer>
+
+  <script src="js/vendor/gsap.min.js"></script>
+  <script src="js/vendor/ScrollTrigger.min.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "./js/vendor/three.module.js" } }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

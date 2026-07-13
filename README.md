@@ -1,3 +1,15 @@
+# Deux sites de démonstration
+
+- **`/` (racine) — ÉLOGE** : maison de mobilier d'exception (ci-dessous).
+- **`/lumen/` — LUMEN** : plateforme IA open source. Robot GLB animé (vraies animations
+  squelettiques, il danse au clic), dragon de verre piloté au scroll, bloom WebGL,
+  lumières colorées animées, particules, aurora, tarifs. Voir `lumen/`.
+
+Lancement identique pour les deux : `python3 -m http.server 8000` à la racine,
+puis `http://localhost:8000` et `http://localhost:8000/lumen/`.
+
+---
+
 # ÉLOGE — Maison de mobilier d'exception
 
 Site vitrine premium (démo) pour une maison française de mobilier haut de gamme :
