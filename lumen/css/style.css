@@ -3,6 +3,13 @@
    charte : nuit profonde + néon violet/cyan/magenta
    ═══════════════════════════════════════════ */
 
+@font-face {
+  font-family: 'Anton';
+  src: url('../assets/fonts/Anton-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   --bg: #06040f;
   --bg-2: #0b0818;
@@ -15,6 +22,7 @@
   --line: rgba(242, 240, 250, 0.1);
   --glass: rgba(139, 92, 246, 0.06);
   --display: "Space Grotesk", "Helvetica Neue", sans-serif;
+  --title: "Anton", "Arial Narrow", "Impact", sans-serif;
   --body: "Inter", "Helvetica Neue", Arial, sans-serif;
   --ease: cubic-bezier(0.65, 0.05, 0, 1);
   --grad: linear-gradient(100deg, var(--cyan) 0%, var(--violet) 45%, var(--magenta) 100%);
@@ -79,9 +87,10 @@ main, .footer { position: relative; z-index: 1; }
 }
 .preloader__inner { text-align: center; }
 .preloader__logo {
-  font-family: var(--display); font-weight: 700;
-  font-size: clamp(2.6rem, 7vw, 5rem);
-  letter-spacing: 0.22em; margin-right: -0.22em;
+  font-family: var(--title); font-weight: 400;
+  text-transform: uppercase;
+  font-size: clamp(3rem, 8vw, 6rem);
+  letter-spacing: 0.14em; margin-right: -0.14em;
 }
 .preloader__count { margin: 1.4rem 0 1rem; font-size: 0.8rem; letter-spacing: 0.3em; color: var(--cyan); }
 .preloader__bar { width: 240px; height: 2px; background: var(--line); margin: 0 auto; overflow: hidden; border-radius: 2px; }
@@ -117,7 +126,7 @@ main, .footer { position: relative; z-index: 1; }
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line);
 }
-.nav__logo { font-family: var(--display); font-weight: 700; font-size: 1.25rem; letter-spacing: 0.18em; }
+.nav__logo { font-family: var(--title); font-weight: 400; font-size: 1.35rem; letter-spacing: 0.16em; text-transform: uppercase; }
 .nav__links { display: flex; align-items: center; gap: 2.2rem; }
 .nav__link {
   font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase;
@@ -199,13 +208,14 @@ main, .footer { position: relative; z-index: 1; }
 .hero__content a, .hero__content button { pointer-events: auto; }
 .hero__eyebrow { font-size: 0.75rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--cyan); margin-bottom: 1.8rem; }
 .hero__title {
-  font-family: var(--display); font-weight: 700;
-  font-size: clamp(2.9rem, 8vw, 6.6rem);
-  line-height: 1.04; letter-spacing: -0.02em;
+  font-family: var(--title); font-weight: 400;
+  text-transform: uppercase;
+  font-size: clamp(3.2rem, 9.2vw, 8rem);
+  line-height: 0.99; letter-spacing: 0.015em;
 }
 .hero__line { display: block; overflow: hidden; }
 .hero__line > span { display: inline-block; }
-.hero__line--small { font-size: 0.52em; font-weight: 500; color: var(--ink-dim); margin-top: 0.4rem; }
+.hero__line--small { font-family: var(--display); font-size: 0.34em; font-weight: 500; letter-spacing: 0.05em; text-transform: none; color: var(--ink-dim); margin-top: 0.9rem; }
 .hero__sub { margin-top: 2rem; font-size: clamp(0.95rem, 1.3vw, 1.12rem); color: var(--ink-dim); max-width: 36rem; }
 .hero__actions { margin-top: 2.6rem; display: flex; gap: 1.1rem; flex-wrap: wrap; }
 .reveal-line { overflow: hidden; }
@@ -253,9 +263,10 @@ main, .footer { position: relative; z-index: 1; }
 .section-head { padding: 0 clamp(1.5rem, 8vw, 9rem); margin-bottom: clamp(3rem, 6vw, 5rem); }
 .section-head__index { font-size: 0.72rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--cyan); }
 .section-head__title {
-  font-family: var(--display); font-weight: 700;
-  font-size: clamp(2.4rem, 5.6vw, 4.6rem);
-  line-height: 1.08; letter-spacing: -0.02em;
+  font-family: var(--title); font-weight: 400;
+  text-transform: uppercase;
+  font-size: clamp(2.8rem, 6.6vw, 5.6rem);
+  line-height: 1.02; letter-spacing: 0.02em;
   margin-top: 0.7rem;
 }
 .section-head__sub { margin-top: 1rem; color: var(--ink-dim); max-width: 36rem; }
@@ -315,9 +326,10 @@ main, .footer { position: relative; z-index: 1; }
 .engine__steps { padding: 18vh clamp(1.5rem, 5vw, 5rem); display: flex; flex-direction: column; gap: 55vh; }
 .engine__num { font-size: 0.72rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--cyan); display: block; margin-bottom: 0.8rem; }
 .engine__step h2 {
-  font-family: var(--display); font-weight: 700;
-  font-size: clamp(2rem, 3.6vw, 3.2rem);
-  line-height: 1.1; letter-spacing: -0.02em;
+  font-family: var(--title); font-weight: 400;
+  text-transform: uppercase;
+  font-size: clamp(2.3rem, 4.2vw, 3.8rem);
+  line-height: 1.04; letter-spacing: 0.02em;
   margin-bottom: 1.2rem;
 }
 .engine__step p { color: var(--ink-dim); max-width: 30rem; }
@@ -334,8 +346,9 @@ main, .footer { position: relative; z-index: 1; }
 .stat { text-align: center; }
 .stat__num {
   display: block;
-  font-family: var(--display); font-weight: 700;
-  font-size: clamp(2.2rem, 4.6vw, 3.9rem);
+  font-family: var(--title); font-weight: 400;
+  font-size: clamp(2.5rem, 5.2vw, 4.5rem);
+  letter-spacing: 0.03em;
   line-height: 1;
 }
 .stat__label { display: block; margin-top: 0.65rem; font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-dim); }
@@ -383,7 +396,7 @@ main, .footer { position: relative; z-index: 1; }
 }
 .plan h3 { font-family: var(--display); font-weight: 600; font-size: 1.15rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
 .plan--hot h3 { color: var(--ink); }
-.plan__price { font-family: var(--display); font-weight: 700; font-size: 3.1rem; margin: 0.8rem 0 1.4rem; }
+.plan__price { font-family: var(--title); font-weight: 400; font-size: 3.6rem; letter-spacing: 0.02em; margin: 0.8rem 0 1.4rem; }
 .plan__price span { font-size: 0.95rem; font-weight: 400; color: var(--ink-dim); margin-left: 0.3rem; }
 .plan ul { list-style: none; flex: 1; margin-bottom: 1.8rem; }
 .plan li { padding: 0.5rem 0 0.5rem 1.6rem; position: relative; font-size: 0.9rem; color: var(--ink-dim); border-bottom: 1px dashed rgba(242,240,250,0.07); }
@@ -412,9 +425,10 @@ main, .footer { position: relative; z-index: 1; }
 }
 .cta h2 {
   position: relative;
-  font-family: var(--display); font-weight: 700;
-  font-size: clamp(2.1rem, 5.4vw, 4.4rem);
-  line-height: 1.14; letter-spacing: -0.02em;
+  font-family: var(--title); font-weight: 400;
+  text-transform: uppercase;
+  font-size: clamp(2.4rem, 6vw, 5.2rem);
+  line-height: 1.06; letter-spacing: 0.02em;
   margin-bottom: 3rem;
 }
 .cta .btn { position: relative; }
@@ -423,7 +437,7 @@ main, .footer { position: relative; z-index: 1; }
 /* ═══════════ FOOTER ═══════════ */
 .footer { border-top: 1px solid var(--line); padding: clamp(3rem, 6vw, 5rem) clamp(1.5rem, 4vw, 4rem) 2rem; background: rgba(6,4,15,0.8); }
 .footer__top { display: flex; justify-content: space-between; gap: 3rem; flex-wrap: wrap; }
-.footer__logo { font-family: var(--display); font-weight: 700; font-size: 1.8rem; letter-spacing: 0.18em; }
+.footer__logo { font-family: var(--title); font-weight: 400; font-size: 2rem; letter-spacing: 0.16em; text-transform: uppercase; }
 .footer__cols { display: flex; gap: clamp(2rem, 6vw, 6rem); flex-wrap: wrap; }
 .footer__cols h4 { font-size: 0.68rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--cyan); font-weight: 600; margin-bottom: 1rem; }
 .footer__cols a { display: block; font-size: 0.88rem; color: var(--ink-dim); margin-bottom: 0.55rem; transition: color 0.3s; }

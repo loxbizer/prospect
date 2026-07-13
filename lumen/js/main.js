@@ -584,9 +584,12 @@ function splitTextNodes(node) {
     child.textContent.split(' ').forEach((word, i, arr) => {
       if (word) {
         const mask = document.createElement('span');
-        mask.style.cssText = 'display:inline-block;overflow:hidden;vertical-align:top;';
+        mask.style.cssText = 'display:inline-block;overflow:hidden;vertical-align:top;margin-bottom:-0.16em;';
         const inner = document.createElement('span');
         inner.className = 'w';
+        /* padding haut sur le MOT : les accents des capitales (É, À) dépassent
+           la ligne en Anton, et background-clip:text ne peint que dans sa boîte */
+        inner.style.cssText = 'display:inline-block;padding-top:0.16em;';
         inner.textContent = word;
         mask.appendChild(inner);
         frag.appendChild(mask);
