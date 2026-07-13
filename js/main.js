@@ -627,6 +627,13 @@ function goQuote(dir) {
 document.getElementById('quoteNext').addEventListener('click', () => goQuote(1));
 document.getElementById('quotePrev').addEventListener('click', () => goQuote(-1));
 
+/* cartes collections → prise de contact */
+document.querySelectorAll('.card').forEach((card) => {
+  card.addEventListener('click', () => {
+    document.getElementById('contact').scrollIntoView({ behavior: prefersReduced ? 'auto' : 'smooth' });
+  });
+});
+
 /* ═══════════════ FALLBACK IMAGES ═══════════════ */
 document.querySelectorAll('img').forEach((img) => {
   img.addEventListener('error', () => img.classList.add('is-broken'));
