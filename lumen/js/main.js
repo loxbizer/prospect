@@ -996,11 +996,11 @@ async function llmLocal(userPrompt, statusEl) {
   return (Array.isArray(last) ? last[last.length - 1].content : String(last)).trim();
 }
 
-async function llmOnce(prompt, timeout) {
+async function llmOnce(prompt, timeout, model = 'openai') {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=mistral', { signal: ctrl.signal });
+    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=' + model, { signal: ctrl.signal });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     let text = (await r.text()).trim();
     /* certaines passerelles renvoient un objet {role, content, reasoning…} brut */
@@ -1016,9 +1016,9 @@ async function llmOnce(prompt, timeout) {
 }
 let lastLLMEngine = '';
 async function llm(prompt, timeout = 35000, statusEl = null) {
-  try { const r = await llmOnce(prompt, timeout); lastLLMEngine = 'API pollinations.ai'; return r; }
+  try { const r = await llmOnce(prompt, timeout, 'openai'); lastLLMEngine = 'API pollinations.ai (openai)'; return r; }
   catch (e1) {
-    try { const r = await llmOnce(prompt, timeout); lastLLMEngine = 'API pollinations.ai'; return r; }
+    try { const r = await llmOnce(prompt, timeout, 'mistral'); lastLLMEngine = 'API pollinations.ai (mistral)'; return r; }
     catch (e2) {
       /* l'API distante ne répond pas : vrai modèle local dans le navigateur */
       const r = await llmLocal(prompt, statusEl);
@@ -1066,6 +1066,232 @@ function cleanupLiveOutputs() {
   if ('speechSynthesis' in window) speechSynthesis.cancel();
 }
 
+/* export WAV d'un AudioBuffer (mono) → téléchargeable */
+function bufferToWav(buf) {
+  const n = buf.length, sr = buf.sampleRate;
+  const data = buf.getChannelData(0);
+  const out = new DataView(new ArrayBuffer(44 + n * 2));
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); out.setUint32(4, 36 + n * 2, true); ws(8, 'WAVEfmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
+  out.setUint32(24, sr, true); out.setUint32(28, sr * 2, true); out.setUint16(32, 2, true);
+  out.setUint16(34, 16, true); ws(36, 'data'); out.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, data[i])) * 32767, true);
+  return new Blob([out.buffer], { type: 'audio/wav' });
+}
+
+/* ─── bruitages réellement synthétisés (OfflineAudioContext) ─── */
+const SFX_DEFS = {
+  aboiement: ['aboi', 'chien', 'bark', 'wouf'],
+  tonnerre: ['tonner', 'orage', 'foudre', 'éclair', 'eclair'],
+  pluie: ['pluie', 'rain', 'averse'],
+  vent: ['vent', 'wind', 'tempête', 'tempete', 'bourrasque'],
+  explosion: ['explos', 'bombe', 'boom', 'grenade'],
+  laser: ['laser', 'blaster', 'pistolet spatial'],
+  sirene: ['sirène', 'sirene', 'alarme', 'police', 'pompier'],
+  klaxon: ['klaxon', 'horn'],
+  moteur: ['moteur', 'engine', 'accélér', 'acceler', 'vroum'],
+  coeur: ['coeur', 'cœur', 'battement', 'cardiaque'],
+  applaudissements: ['applaud', 'clap', 'foule', 'ovation'],
+  pas: ['bruit de pas', 'footsteps', 'marche dans'],
+};
+function matchSFX(p) {
+  const q = p.toLowerCase();
+  for (const k in SFX_DEFS) if (SFX_DEFS[k].some((w) => q.includes(w))) return k;
+  return null;
+}
+function noiseSrc(ctx, dur) {
+  const b = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource(); src.buffer = b; return src;
+}
+async function renderSFX(kind) {
+  const sr = 44100;
+  const DUR = { aboiement: 1.4, tonnerre: 4.5, pluie: 5, vent: 5, explosion: 2.8, laser: 1, sirene: 3.2, klaxon: 1.6, moteur: 3.5, coeur: 2.6, applaudissements: 3.2, pas: 3 }[kind] || 2.5;
+  const ctx = new OfflineAudioContext(1, sr * DUR, sr);
+  const master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  const env = (node, t0, a, peak, d) => {
+    node.gain.setValueAtTime(0, t0);
+    node.gain.linearRampToValueAtTime(peak, t0 + a);
+    node.gain.exponentialRampToValueAtTime(0.001, t0 + a + d);
+  };
+  if (kind === 'aboiement') {
+    [0, 0.5].forEach((t0) => {
+      const o = ctx.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(420, t0); o.frequency.exponentialRampToValueAtTime(130, t0 + 0.22);
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 750; f.Q.value = 1.2;
+      const g = ctx.createGain(); env(g, t0, 0.012, 1, 0.24);
+      o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.4);
+      const n = noiseSrc(ctx, 0.3); const nf = ctx.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = 1600;
+      const ng = ctx.createGain(); env(ng, t0, 0.01, 0.35, 0.15);
+      n.connect(nf); nf.connect(ng); ng.connect(master); n.start(t0);
+    });
+  } else if (kind === 'tonnerre') {
+    const crack = noiseSrc(ctx, 0.4); const cf = ctx.createBiquadFilter(); cf.type = 'highpass'; cf.frequency.value = 1200;
+    const cg = ctx.createGain(); env(cg, 0.02, 0.005, 0.9, 0.35);
+    crack.connect(cf); cf.connect(cg); cg.connect(master); crack.start(0);
+    const n = noiseSrc(ctx, DUR); const f = ctx.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(400, 0); f.frequency.exponentialRampToValueAtTime(60, DUR);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, 0); g.gain.linearRampToValueAtTime(1, 0.25);
+    for (let t = 0.6; t < DUR - 0.4; t += 0.5) g.gain.linearRampToValueAtTime(0.25 + Math.random() * 0.7, t);
+    g.gain.linearRampToValueAtTime(0.001, DUR);
+    n.connect(f); f.connect(g); g.connect(master); n.start(0);
+  } else if (kind === 'pluie') {
+    const n = noiseSrc(ctx, DUR); const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 5200; f.Q.value = 0.4;
+    const g = ctx.createGain(); g.gain.value = 0.5;
+    n.connect(f); f.connect(g); g.connect(master); n.start(0);
+    const n2 = noiseSrc(ctx, DUR); const f2 = ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 900;
+    const g2 = ctx.createGain(); g2.gain.value = 0.18;
+    n2.connect(f2); f2.connect(g2); g2.connect(master); n2.start(0);
+  } else if (kind === 'vent') {
+    const n = noiseSrc(ctx, DUR); const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2.5;
+    f.frequency.setValueAtTime(300, 0);
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.16;
+    const lg = ctx.createGain(); lg.gain.value = 220;
+    lfo.connect(lg); lg.connect(f.frequency); lfo.start(0);
+    const g = ctx.createGain(); g.gain.value = 0.7;
+    n.connect(f); f.connect(g); g.connect(master); n.start(0);
+  } else if (kind === 'explosion') {
+    const n = noiseSrc(ctx, DUR); const f = ctx.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(2600, 0); f.frequency.exponentialRampToValueAtTime(70, DUR * 0.8);
+    const g = ctx.createGain(); env(g, 0, 0.008, 1, DUR * 0.85);
+    n.connect(f); f.connect(g); g.connect(master); n.start(0);
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(110, 0); o.frequency.exponentialRampToValueAtTime(35, 0.9);
+    const og = ctx.createGain(); env(og, 0, 0.01, 0.9, 1.1);
+    o.connect(og); og.connect(master); o.start(0); o.stop(1.4);
+  } else if (kind === 'laser') {
+    [0, 0.45].forEach((t0) => {
+      const o = ctx.createOscillator(); o.type = 'square';
+      o.frequency.setValueAtTime(2100, t0); o.frequency.exponentialRampToValueAtTime(90, t0 + 0.3);
+      const g = ctx.createGain(); env(g, t0, 0.005, 0.6, 0.3);
+      o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.4);
+    });
+  } else if (kind === 'sirene') {
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 720;
+    const lfo = ctx.createOscillator(); lfo.type = 'triangle'; lfo.frequency.value = 0.55;
+    const lg = ctx.createGain(); lg.gain.value = 190;
+    lfo.connect(lg); lg.connect(o.frequency); lfo.start(0);
+    const g = ctx.createGain(); g.gain.value = 0.5;
+    o.connect(g); g.connect(master); o.start(0);
+  } else if (kind === 'klaxon') {
+    [0, 0.75].forEach((t0, i) => {
+      [440, 554].forEach((fr) => {
+        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = fr;
+        const g = ctx.createGain(); env(g, t0, 0.02, 0.35, i ? 0.6 : 0.35);
+        o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.8);
+      });
+    });
+  } else if (kind === 'moteur') {
+    const o = ctx.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(70, 0); o.frequency.exponentialRampToValueAtTime(210, DUR);
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 27;
+    const lg = ctx.createGain(); lg.gain.value = 0.4;
+    const g = ctx.createGain(); g.gain.value = 0.5;
+    lfo.connect(lg); lg.connect(g.gain); lfo.start(0);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 800;
+    o.connect(f); f.connect(g); g.connect(master); o.start(0);
+  } else if (kind === 'coeur') {
+    [0, 0.28, 1.0, 1.28, 2.0].forEach((t0, i) => {
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = i % 2 ? 42 : 55;
+      const g = ctx.createGain(); env(g, t0, 0.015, 0.9, 0.22);
+      o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.35);
+    });
+  } else if (kind === 'applaudissements') {
+    for (let i = 0; i < 220; i++) {
+      const t0 = Math.random() * (DUR - 0.1);
+      const n = noiseSrc(ctx, 0.05); const f = ctx.createBiquadFilter(); f.type = 'bandpass';
+      f.frequency.value = 1500 + Math.random() * 2500;
+      const g = ctx.createGain(); env(g, t0, 0.002, 0.12 + Math.random() * 0.12, 0.05);
+      n.connect(f); f.connect(g); g.connect(master); n.start(t0);
+    }
+  } else if (kind === 'pas') {
+    for (let i = 0; i < 6; i++) {
+      const t0 = i * 0.48;
+      const n = noiseSrc(ctx, 0.12); const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 420;
+      const g = ctx.createGain(); env(g, t0, 0.004, 0.7, 0.1);
+      n.connect(f); f.connect(g); g.connect(master); n.start(t0);
+    }
+  } else {
+    const o = ctx.createOscillator(); o.frequency.value = 220;
+    const g = ctx.createGain(); env(g, 0, 0.02, 0.5, DUR * 0.8);
+    o.connect(g); g.connect(master); o.start(0);
+  }
+  return await ctx.startRendering();
+}
+
+/* instru hip-hop seedée, rendue hors-ligne (→ téléchargeable) */
+async function renderBeat(rng, bars = 8) {
+  const sr = 44100, bpm = 88, beat = 60 / bpm, dur = bars * 4 * beat + 0.5;
+  const ctx = new OfflineAudioContext(1, sr * dur, sr);
+  const master = ctx.createGain(); master.gain.value = 0.85; master.connect(ctx.destination);
+  const bassNotes = [55, 55, 65.4, 49].map((f) => f * (rng() < 0.5 ? 1 : 1.5));
+  for (let bar = 0; bar < bars; bar++) {
+    for (let step = 0; step < 4; step++) {
+      const t0 = (bar * 4 + step) * beat;
+      /* kick sur 1 et 3 (+ variation) */
+      if (step === 0 || step === 2 || rng() < 0.15) {
+        const o = ctx.createOscillator(); o.frequency.setValueAtTime(120, t0); o.frequency.exponentialRampToValueAtTime(38, t0 + 0.12);
+        const g = ctx.createGain(); g.gain.setValueAtTime(1, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
+        o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.3);
+      }
+      /* snare sur 2 et 4 */
+      if (step === 1 || step === 3) {
+        const n = noiseSrc(ctx, 0.15); const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1900;
+        const g = ctx.createGain(); g.gain.setValueAtTime(0.5, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.14);
+        n.connect(f); f.connect(g); g.connect(master); n.start(t0);
+      }
+      /* hi-hats en croches */
+      for (let h = 0; h < 2; h++) {
+        const th = t0 + h * beat / 2;
+        const n = noiseSrc(ctx, 0.04); const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7500;
+        const g = ctx.createGain(); g.gain.setValueAtTime(h ? 0.1 : 0.18, th); g.gain.exponentialRampToValueAtTime(0.001, th + 0.04);
+        n.connect(f); f.connect(g); g.connect(master); n.start(th);
+      }
+    }
+    /* basse : une note par mesure */
+    const bf = bassNotes[bar % 4];
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = bf;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 300;
+    const g = ctx.createGain(); const t0 = bar * 4 * beat;
+    g.gain.setValueAtTime(0.4, t0); g.gain.setValueAtTime(0.4, t0 + 4 * beat - 0.1); g.gain.linearRampToValueAtTime(0, t0 + 4 * beat);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 4 * beat);
+  }
+  return await ctx.startRendering();
+}
+
+/* lecteur + bouton de téléchargement pour un AudioBuffer rendu */
+function audioResult(buf, filename, note) {
+  const blob = bufferToWav(buf);
+  const url = URL.createObjectURL(blob);
+  const player = document.createElement('audio');
+  player.controls = true; player.src = url; player.style.cssText = 'width:100%;margin-top:0.8rem;';
+  playOut.appendChild(player);
+  const dl = document.createElement('a');
+  dl.className = 'chip play__replay';
+  dl.textContent = '⬇ Télécharger (.wav)';
+  dl.href = url; dl.download = filename;
+  playOut.appendChild(dl);
+  if (note) { const m = document.createElement('p'); m.className = 'play__meta'; m.textContent = note; playOut.appendChild(m); }
+  player.play().catch(() => {});
+  return player;
+}
+
+/* TTS distant téléchargeable (openai-audio via pollinations), sinon voix navigateur */
+async function ttsDownloadable(text) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 45000);
+  try {
+    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(text) + '?model=openai-audio&voice=alloy', { signal: ctrl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const type = r.headers.get('content-type') || '';
+    if (!type.includes('audio')) throw new Error('pas de flux audio');
+    return await r.blob();
+  } finally { clearTimeout(t); }
+}
+
 function speak(text) {
   if (!('speechSynthesis' in window)) return false;
   const u = new SpeechSynthesisUtterance(text);
@@ -1088,8 +1314,9 @@ const LIB3D = [
   { keys: ['casque', 'helmet', 'armure', 'soldat', 'guerrier', 'cyber', 'space', 'astronaute', 'combat', 'fps', 'guerre'], file: 'assets/models/lib/DamagedHelmet.glb', name: 'Casque sci-fi', size: 1.8 },
   { keys: ['bouteille', 'bottle', 'gourde', 'eau', 'boisson'], file: 'assets/models/lib/WaterBottle.glb', name: 'Bouteille', size: 1.7 },
   { keys: ['dragon', 'creature', 'créature', 'monstre'], file: 'assets/models/DragonAttenuation.glb', name: 'Dragon de verre', size: 1.9, kind: 'dragon' },
+  { keys: ['loup', 'renard', 'fox', 'chien', 'animal'], file: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb', name: 'Renard (animal animé)', size: 1.9, kind: 'humanoid' },
 ];
-const LIB3D_WORDS = { robot: 0, human: 1, sofa: 2, chair: 3, car: 4, duck: 5, helmet: 6, bottle: 7, dragon: 8 };
+const LIB3D_WORDS = { robot: 0, human: 1, sofa: 2, chair: 3, car: 4, duck: 5, helmet: 6, bottle: 7, dragon: 8, fox: 9 };
 
 function matchLib3D(prompt) {
   const p = prompt.toLowerCase();
@@ -1098,7 +1325,7 @@ function matchLib3D(prompt) {
 
 async function classifyLib3D(prompt) {
   try {
-    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: robot, human, sofa, chair, car, duck, helmet, bottle, dragon, abstract. ("robot/android" → robot, "humain/personnage réaliste" → human.) Answer ONLY one word.`, 12000)).toLowerCase();
+    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: robot, human, sofa, chair, car, duck, fox, helmet, bottle, dragon, abstract. ("robot/android" → robot ; "humain/personnage" → human ; "loup/renard/chien/animal terrestre" → fox ; duck SEULEMENT pour canard/oiseau.) Answer ONLY one word.`, 12000)).toLowerCase();
     for (const w in LIB3D_WORDS) if (out.includes(w)) return LIB3D[LIB3D_WORDS[w]];
   } catch (e) { /* pas grave */ }
   return null;
@@ -1497,10 +1724,16 @@ function sitePrompt(prompt, compact) {
   return `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Exigences : design sombre premium (dégradés, glassmorphism), CSS compact dans <style>, textes français courts et réalistes, animations au scroll (IntersectionObserver + transitions CSS). Intègre un objet 3D réel : <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script> puis <model-viewer style="width:100%;height:320px" src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/NOM/glTF-Binary/NOM.glb" camera-controls auto-rotate></model-viewer> en remplaçant NOM par LE modèle qui correspond au sujet : GlamVelvetSofa (canapé), SheenChair (fauteuil), ToyCar (voiture jouet), CarConcept (voiture réaliste), DamagedHelmet (casque sci-fi), Duck (canard), WaterBottle (bouteille), Lantern (lanterne), AntiqueCamera (appareil photo vintage), BoomBox (radio), ChronographWatch (montre) — un canapé pour une boutique de canapés, PAS un casque. Pas d'autres ressources externes. IMPÉRATIF : ${compact ? 'MAXIMUM 90 lignes, ' : 'sois compact (max 140 lignes), '}la réponse doit se terminer par </html>. Réponds UNIQUEMENT le code HTML, sans backticks.`;
 }
 
-function localGameHTML(prompt) {
-  const title = (prompt.charAt(0).toUpperCase() + prompt.slice(1)).replace(/[<>&"]/g, '');
+function localGameHTML(prompt, design = {}) {
+  const clean = (v, d) => (typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v) ? v : d);
+  const PC = clean(design.couleurJoueur, '#22d3ee');
+  const EC = clean(design.couleurEnnemis, '#e879f9');
+  const BGC = clean(design.couleurFond, '#06040f');
+  const BLOCKY = design.style === 'blocs' || /roblox|minecraft|lego|bloc/i.test(prompt);
+  const ENAME = String(design.ennemis || 'ennemis').replace(/[<>&"]/g, '').slice(0, 24);
+  const title = String(design.titre || (prompt.charAt(0).toUpperCase() + prompt.slice(1))).replace(/[<>&"]/g, '').slice(0, 48);
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#06040f;font-family:system-ui,sans-serif;color:#fff}
+  html,body{margin:0;height:100%;overflow:hidden;background:${BGC};font-family:system-ui,sans-serif;color:#fff}
   canvas{display:block;width:100vw;height:100vh}
   #ui{position:fixed;top:10px;left:12px;font-weight:700;text-shadow:0 0 8px #8b5cf6}
   #msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(6,4,15,.82);cursor:pointer;text-align:center}
@@ -1508,7 +1741,7 @@ function localGameHTML(prompt) {
   #msg p{color:#9d97b8;margin:4px}
   </style></head><body>
   <canvas id="c"></canvas><div id="ui">SCORE 0 · VIES 3</div>
-  <div id="msg"><h1>${title}</h1><p>Flèches / ZQSD : bouger · Souris : viser · Clic : tirer</p><p><b>CLIQUE POUR JOUER</b></p></div>
+  <div id="msg"><h1>${title}</h1><p>Flèches / ZQSD : bouger · Souris : viser · Clic : tirer sur les ${ENAME}</p><p><b>CLIQUE POUR JOUER</b></p></div>
   <script>
   const cv=document.getElementById('c'),x=cv.getContext('2d'),ui=document.getElementById('ui'),msg=document.getElementById('msg');
   let W,H;function rs(){W=cv.width=innerWidth;H=cv.height=innerHeight}rs();addEventListener('resize',rs);
@@ -1520,7 +1753,7 @@ function localGameHTML(prompt) {
   msg.addEventListener('click',()=>{run=true;score=0;lives=3;E.length=0;B.length=0;P.x=W/2;P.y=H/2;msg.style.display='none'});
   function boom(x0,y0,c){for(let i=0;i<14;i++)PT.push({x:x0,y:y0,vx:(Math.random()-.5)*6,vy:(Math.random()-.5)*6,l:26,c})}
   function loop(){
-    x.fillStyle='rgba(6,4,15,.32)';x.fillRect(0,0,W,H);
+    x.fillStyle='${BGC}52';x.fillRect(0,0,W,H);
     if(run){
       if(K.arrowleft||K.q)P.x-=P.s;if(K.arrowright||K.d)P.x+=P.s;
       if(K.arrowup||K.z)P.y-=P.s;if(K.arrowdown||K.s)P.y+=P.s;
@@ -1536,9 +1769,14 @@ function localGameHTML(prompt) {
           if(lives<=0){run=false;msg.style.display='flex';msg.querySelector('p b').textContent='GAME OVER — SCORE '+score+' · CLIQUE POUR REJOUER'}}}
       ui.textContent='SCORE '+score+' · VIES '+lives;
     }
-    x.fillStyle='#22d3ee';x.beginPath();x.arc(P.x,P.y,P.r,0,7);x.fill();
+    const BL=${BLOCKY ? 'true' : 'false'};
+    function actor(cx,cy,r,col){x.fillStyle=col;
+      if(BL){x.fillRect(cx-r,cy-r,r*2,r*2);x.fillStyle='#fff';x.fillRect(cx-r*.55,cy-r*.45,r*.4,r*.4);x.fillRect(cx+r*.15,cy-r*.45,r*.4,r*.4);
+        x.fillStyle='#000';x.fillRect(cx-r*.45,cy-r*.35,r*.2,r*.2);x.fillRect(cx+r*.25,cy-r*.35,r*.2,r*.2)}
+      else{x.beginPath();x.arc(cx,cy,r,0,7);x.fill()}}
+    actor(P.x,P.y,P.r,'${PC}');
     x.strokeStyle='#8b5cf6';x.beginPath();x.moveTo(P.x,P.y);x.lineTo(P.x+(mx-P.x)*.12,P.y+(my-P.y)*.12);x.stroke();
-    x.fillStyle='#e879f9';E.forEach(e=>{x.beginPath();x.arc(e.x,e.y,e.r,0,7);x.fill()});
+    E.forEach(e=>actor(e.x,e.y,e.r,'${EC}'));
     x.fillStyle='#fff';B.forEach(b=>{x.beginPath();x.arc(b.x,b.y,3,0,7);x.fill()});
     for(let i=PT.length-1;i>=0;i--){const p=PT[i];p.x+=p.vx;p.y+=p.vy;p.l--;x.globalAlpha=p.l/26;x.fillStyle=p.c;x.fillRect(p.x,p.y,3,3);x.globalAlpha=1;if(p.l<=0)PT.splice(i,1)}
     requestAnimationFrame(loop);
@@ -1710,8 +1948,15 @@ async function generate() {
         await pipeline(['Game design → boucle de jeu']);
         const gameStatus = document.createElement('p');
         gameStatus.className = 'play__pipe';
-        gameStatus.innerHTML = '⚙ Écriture du jeu…';
+        gameStatus.innerHTML = '⚙ Direction artistique…';
         playOut.appendChild(gameStatus);
+        /* le LLM écrit d'abord une fiche de design pour thématiser le jeu */
+        let design = null;
+        try {
+          const dj = await llm(`Fiche de design JSON pour un mini-jeu 2D sur le thème "${prompt}". Réponds UNIQUEMENT un JSON valide : {"titre":"…","couleurJoueur":"#hex","couleurEnnemis":"#hex","couleurFond":"#hex sombre","ennemis":"nom court des ennemis","style":"blocs" ou "rond"} — "blocs" si le thème évoque roblox/minecraft/lego, sinon au choix.`, 18000);
+          design = JSON.parse(dj.slice(dj.indexOf('{'), dj.lastIndexOf('}') + 1));
+          gameStatus.innerHTML = `<b>✓</b> DA : « ${design.titre || prompt} », ennemis « ${design.ennemis || '?'} », style ${design.style || 'rond'}`;
+        } catch (e) { /* défauts seedés */ }
         let ghtml = null;
         try {
           ghtml = stripFences(await llm(`Crée un MINI-JEU HTML5 JOUABLE sur le thème "${prompt}" : une page HTML complète avec <canvas> plein écran, un joueur déplaçable (flèches/ZQSD), tir vers la souris au clic, ennemis qui apparaissent et poursuivent, score et vies affichés, écran "clique pour jouer", game over avec rejouer. Style néon sombre. Tout le JS inline, AUCUNE ressource externe. IMPÉRATIF : max 130 lignes et termine par </html>. Réponds UNIQUEMENT le HTML.`, 60000, gameStatus));
@@ -1721,7 +1966,7 @@ async function generate() {
           ghtml = null;
           gameStatus.innerHTML = '<b>✓</b> Jeu généré par le moteur local LUMEN';
         }
-        showSite(ghtml || localGameHTML(prompt),
+        showSite(ghtml || localGameHTML(prompt, design || {}),
           'Mini-jeu JOUABLE rendu ci-dessus — clique dedans puis flèches/ZQSD pour bouger, souris pour tirer.');
         return;
       }
@@ -1810,43 +2055,88 @@ async function generate() {
       playOut.appendChild(meta);
     }
 
-    /* ── AUDIO : vraie voix + mélodie ── */
+    /* ── AUDIO : voix du texte demandé / bruitage synthétisé / musique ── */
     if (cfg.type === 'audio') {
-      await pipeline(['Synthèse de la mélodie', 'Préparation de la voix']);
-      const eq = document.createElement('div');
-      eq.className = 'play__eq';
-      for (let i = 0; i < 28; i++) eq.appendChild(document.createElement('span'));
-      playOut.appendChild(eq);
-      const bars = [...eq.children];
-      playMelody(rng, bars);
-      let phrase = `${prompt}. Voilà ce que je peux chanter pour toi, humain.`;
-      try {
-        phrase = await llm(`En une ou deux phrases courtes en français, réponds avec personnalité (tu es LUMEN, une IA androïde calme) à : "${prompt}".`, 20000);
-        aiStatusLine(true);
-      } catch (err) { /* la voix locale marche quand même */ }
-      const meta = document.createElement('p');
-      meta.className = 'play__meta';
-      meta.textContent = 'Mélodie synthétisée en Web Audio + voix française de votre navigateur (Web Speech).';
-      playOut.appendChild(meta);
-      const row = document.createElement('div');
-      const voiceBtn = document.createElement('button');
-      voiceBtn.className = 'chip play__replay';
-      voiceBtn.textContent = '🔊 Écouter la voix';
-      voiceBtn.addEventListener('click', () => {
-        if (!speak(phrase)) showToast('Synthèse vocale non disponible dans ce navigateur');
-      });
-      const replay = document.createElement('button');
-      replay.className = 'chip play__replay';
-      replay.style.marginLeft = '0.5rem';
-      replay.textContent = '↻ Rejouer la mélodie';
-      replay.addEventListener('click', () => playMelody(seededRng(prompt + currentCap), bars));
-      row.appendChild(voiceBtn); row.appendChild(replay);
-      playOut.appendChild(row);
-      speak(phrase);
-      const txt = document.createElement('p');
-      txt.className = 'play__text';
-      txt.textContent = '« ' + phrase + ' »';
-      playOut.appendChild(txt);
+      const MUSICY = /musique|music|\brap\b|chanson|\bbeat\b|instru|\bson de rap|hip.?hop|m[ée]lodie/i;
+      const SFXY = /bruit|\bson\b|sound|effet sonore/i;
+      let sfxKind = matchSFX(prompt);
+
+      if (!sfxKind && SFXY.test(prompt) && !MUSICY.test(prompt)) {
+        /* l'IA mappe la demande vers le bruitage le plus proche */
+        await pipeline(['Analyse de la demande sonore']);
+        try {
+          const k = (await llm(`Quel effet sonore correspond le mieux à "${prompt}" ? Choisis UN mot parmi : ${Object.keys(SFX_DEFS).join(', ')}, ou NONE. Réponds seulement le mot.`, 12000)).toLowerCase().trim();
+          if (SFX_DEFS[k]) sfxKind = k;
+        } catch (e) { /* on passera en voix */ }
+      }
+
+      if (sfxKind) {
+        /* ─ bruitage réellement synthétisé, téléchargeable ─ */
+        await pipeline([`Synthèse du bruitage « <b>${sfxKind}</b> » (WebAudio, hors-ligne)`]);
+        const buf = await renderSFX(sfxKind);
+        audioResult(buf, `lumen-${sfxKind}.wav`,
+          `Bruitage « ${sfxKind} » généré par synthèse (oscillateurs + bruit filtré), pour « ${prompt} ». Fichier .wav téléchargeable. La version complète utilise AudioGen pour des sons photoréalistes.`);
+      } else if (MUSICY.test(prompt)) {
+        /* ─ musique : paroles LLM + instru générée + voix ─ */
+        await pipeline(['Écriture des paroles']);
+        let lyrics = null;
+        try { lyrics = await llm(`Écris 8 lignes de ${/rap/i.test(prompt) ? 'rap' : 'chanson'} en français, percutantes et qui riment, sur : "${prompt}". Réponds UNIQUEMENT les 8 lignes.`, 25000); }
+        catch (e) { lyrics = null; }
+        await pipeline(['Composition de l\'instru (88 BPM, batterie + basse)']);
+        const buf = await renderBeat(rng);
+        const player = audioResult(buf, 'lumen-instru.wav',
+          `Instru générée note par note (kick/snare/hats/basse seedés par votre prompt) — .wav téléchargeable.` + (lyrics ? ' La voix lit les paroles par-dessus.' : ''));
+        if (lyrics) {
+          const txt = document.createElement('p');
+          txt.className = 'play__text';
+          txt.textContent = lyrics;
+          playOut.appendChild(txt);
+          setTimeout(() => speak(lyrics), 600);
+          player.addEventListener('play', () => speak(lyrics));
+        }
+      } else {
+        /* ─ voix : dire EXACTEMENT ce qui est demandé ─ */
+        const isInstruction = /^(dis|d[ée]clame|lis|r[ée]cite|annonce|raconte|fais dire)\b/i.test(prompt);
+        let toSay = prompt;
+        if (isInstruction) {
+          await pipeline(['Rédaction du texte à prononcer']);
+          try { toSay = await llm(`Donne UNIQUEMENT le texte exact à prononcer pour cette demande (sans guillemets ni commentaire) : "${prompt}"`, 15000); } catch (e) { toSay = prompt.replace(/^(dis|d[ée]clame|lis|r[ée]cite|annonce|raconte|fais dire)\s*/i, ''); }
+        }
+        await pipeline(['Synthèse vocale du texte demandé']);
+        const txt = document.createElement('p');
+        txt.className = 'play__text';
+        txt.textContent = '« ' + toSay + ' »';
+        playOut.appendChild(txt);
+        let gotFile = false;
+        try {
+          const blob = await ttsDownloadable(toSay);
+          const url = URL.createObjectURL(blob);
+          const player = document.createElement('audio');
+          player.controls = true; player.src = url; player.style.cssText = 'width:100%;margin-top:0.8rem;';
+          playOut.appendChild(player);
+          const dl = document.createElement('a');
+          dl.className = 'chip play__replay';
+          dl.textContent = '⬇ Télécharger (.mp3)';
+          dl.href = url; dl.download = 'lumen-voix.mp3';
+          playOut.appendChild(dl);
+          player.play().catch(() => {});
+          gotFile = true;
+          const m = document.createElement('p'); m.className = 'play__meta';
+          m.textContent = 'Voix IA générée (openai-audio via pollinations.ai) — fichier téléchargeable.';
+          playOut.appendChild(m);
+        } catch (e) { /* repli voix navigateur */ }
+        if (!gotFile) {
+          speak(toSay);
+          const b = document.createElement('button');
+          b.className = 'chip play__replay';
+          b.textContent = '🔊 Réécouter';
+          b.addEventListener('click', () => speak(toSay));
+          playOut.appendChild(b);
+          const m = document.createElement('p'); m.className = 'play__meta';
+          m.textContent = 'Voix du navigateur (l\'API distante de TTS téléchargeable n\'a pas répondu ici).';
+          playOut.appendChild(m);
+        }
+      }
     }
   } finally {
     playGo.disabled = false;
