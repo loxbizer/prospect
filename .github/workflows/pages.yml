@@ -1,8 +1,6 @@
 name: Déployer le site sur GitHub Pages
 
 on:
-  push:
-    branches: [claude/3d-website-enterprise-sts0ze]
   workflow_dispatch:
 
 permissions:
