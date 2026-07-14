@@ -1074,9 +1074,9 @@ function speak(text) {
 const LIB3D = [
   { keys: ['canap', 'sofa', 'divan', 'banquette'], file: '../assets/models/GlamVelvetSofa.glb', name: 'Canapé en velours', size: 1.9 },
   { keys: ['chaise', 'fauteuil', 'chair', 'siège', 'siege', 'assise'], file: '../assets/models/SheenChair.glb', name: 'Fauteuil bouclé', size: 1.8 },
-  { keys: ['voiture', 'auto', 'car', 'bagnole', 'vehicule', 'véhicule'], file: 'assets/models/lib/ToyCar.glb', name: 'Voiture', size: 1.9 },
+  { keys: ['voiture', 'auto', 'car', 'bagnole', 'vehicule', 'véhicule', 'gta', 'course', 'racing', 'taxi', 'route', 'conduite', 'drift'], file: 'assets/models/lib/ToyCar.glb', name: 'Voiture', size: 1.9 },
   { keys: ['canard', 'duck', 'oiseau', 'poule'], file: 'assets/models/lib/Duck.glb', name: 'Canard', size: 1.7 },
-  { keys: ['casque', 'helmet', 'armure', 'soldat', 'guerrier', 'cyber'], file: 'assets/models/lib/DamagedHelmet.glb', name: 'Casque sci-fi', size: 1.8 },
+  { keys: ['casque', 'helmet', 'armure', 'soldat', 'guerrier', 'cyber', 'space', 'astronaute', 'combat', 'fps', 'guerre'], file: 'assets/models/lib/DamagedHelmet.glb', name: 'Casque sci-fi', size: 1.8 },
   { keys: ['bouteille', 'bottle', 'gourde', 'eau', 'boisson'], file: 'assets/models/lib/WaterBottle.glb', name: 'Bouteille', size: 1.7 },
   { keys: ['dragon', 'creature', 'créature', 'monstre'], file: 'assets/models/DragonAttenuation.glb', name: 'Dragon de verre', size: 1.9 },
 ];
@@ -1089,7 +1089,7 @@ function matchLib3D(prompt) {
 
 async function classifyLib3D(prompt) {
   try {
-    const out = (await llm(`Classify "${prompt}" into exactly one word among: sofa, chair, car, duck, helmet, bottle, dragon, abstract. Answer only the word.`, 12000)).toLowerCase();
+    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: sofa, chair, car, duck, helmet, bottle, dragon, abstract. Answer ONLY one word.`, 12000)).toLowerCase();
     for (const w in LIB3D_WORDS) if (out.includes(w)) return LIB3D[LIB3D_WORDS[w]];
   } catch (e) { /* pas grave */ }
   return null;
@@ -1181,31 +1181,61 @@ function spawnMini3d(rng, model3d = null, modelSize = 1.8) {
   return { triangles: Math.round(tris) };
 }
 
-/* lecteur de frames IA : fondu enchaîné + léger zoom (Ken Burns) */
+/* lecteur façon bande-annonce : coupes franches, zoom lent, letterbox, grain */
 function playFrames(imgs) {
   const c = document.createElement('canvas');
   c.width = 768; c.height = 432; c.className = 'play__canvas';
   playOut.appendChild(c);
   const ctx = c.getContext('2d');
-  const per = 1500, fade = 550;
+  /* grain film pré-généré */
+  const noise = document.createElement('canvas');
+  noise.width = 256; noise.height = 256;
+  const nctx = noise.getContext('2d');
+  const nd = nctx.createImageData(256, 256);
+  for (let i = 0; i < nd.data.length; i += 4) {
+    const v = Math.random() * 255;
+    nd.data[i] = nd.data[i + 1] = nd.data[i + 2] = v;
+    nd.data[i + 3] = 22;
+  }
+  nctx.putImageData(nd, 0, 0);
+
+  const HOLD = 2600, FADEIN = 160;
   const start = performance.now();
-  const drawImg = (img, tt, alpha) => {
-    ctx.globalAlpha = alpha;
-    const zoom = 1.03 + 0.07 * tt;
+  const draw = (now) => {
+    const t = now - start;
+    const i = Math.floor(t / HOLD) % imgs.length;
+    const tt = (t % HOLD) / HOLD;             /* progression dans le plan */
+    /* zoom lent type Ken Burns, direction alternée */
+    const zoom = i % 2 ? 1.14 - 0.09 * tt : 1.05 + 0.09 * tt;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, c.width, c.height);
     ctx.save();
     ctx.translate(c.width / 2, c.height / 2);
     ctx.scale(zoom, zoom);
-    ctx.drawImage(img, -c.width / 2, -c.height / 2, c.width, c.height);
+    ctx.drawImage(imgs[i], -c.width / 2, -c.height / 2, c.width, c.height);
     ctx.restore();
-    ctx.globalAlpha = 1;
-  };
-  const draw = (now) => {
-    const t = now - start;
-    const i = Math.floor(t / per) % imgs.length;
-    const tt = (t % per) / per;
-    drawImg(imgs[i], tt, 1);
-    const ft = (t % per) - (per - fade);
-    if (ft > 0) drawImg(imgs[(i + 1) % imgs.length], 0, ft / fade);
+    /* coupe franche : très bref fondu depuis le noir en tête de plan */
+    const ft = t % HOLD;
+    if (ft < FADEIN) {
+      ctx.fillStyle = `rgba(0,0,0,${1 - ft / FADEIN})`;
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
+    /* grain film */
+    ctx.drawImage(noise, Math.random() * -80, Math.random() * -80, c.width + 160, c.height + 160);
+    /* vignettage */
+    const vg = ctx.createRadialGradient(c.width / 2, c.height / 2, c.height * 0.45, c.width / 2, c.height / 2, c.height * 0.95);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, c.width, c.height);
+    /* letterbox cinéma */
+    const bar = c.height * 0.11;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, c.width, bar);
+    ctx.fillRect(0, c.height - bar, c.width, bar);
+    /* compteur de plan */
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = '12px monospace';
+    ctx.fillText(`PLAN ${i + 1}/${imgs.length}`, 14, c.height - bar - 10);
     vidRaf = requestAnimationFrame(draw);
   };
   vidRaf = requestAnimationFrame(draw);
@@ -1263,6 +1293,10 @@ function showSite(html, label) {
   });
   playOut.appendChild(tog);
   playOut.appendChild(codeEl);
+}
+
+function sitePrompt(prompt, compact) {
+  return `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Exigences : design sombre premium (dégradés, glassmorphism), CSS compact dans <style>, textes français courts et réalistes, animations au scroll (IntersectionObserver + transitions CSS). Intègre un objet 3D réel : <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script> puis <model-viewer style="width:100%;height:320px" src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb" camera-controls auto-rotate></model-viewer> (GLB au choix : DamagedHelmet, Duck, ToyCar, WaterBottle — adapte au sujet). Pas d'autres ressources externes. IMPÉRATIF : ${compact ? 'MAXIMUM 90 lignes, ' : 'sois compact (max 140 lignes), '}la réponse doit se terminer par </html>. Réponds UNIQUEMENT le code HTML, sans backticks.`;
 }
 
 function localSiteHTML(prompt) {
@@ -1370,16 +1404,21 @@ async function generate() {
       wait.innerHTML = '⚙ Génération des images clés (0/3)…';
       playOut.appendChild(wait);
       try {
-        /* séquentiel : l'API gratuite limite les requêtes parallèles */
+        /* même seed pour tous les plans → cohérence visuelle ; retry par plan */
+        const SHOTS = ['establishing wide shot', 'medium shot', 'dramatic close-up', 'low angle action shot'];
         const imgs = [];
-        for (let k = 0; k < 5; k++) {
-          wait.innerHTML = `⚙ Génération des images clés (${k}/5)… ~15 s chacune`;
+        for (let k = 0; k < SHOTS.length; k++) {
+          wait.innerHTML = `⚙ Plan ${k + 1}/${SHOTS.length} (« ${SHOTS[k]} »)… ~15 s`;
+          const shotPrompt = `${enPrompt}, ${SHOTS[k]}, consistent color grading`;
           try {
-            imgs.push(await loadAIImage(`${enPrompt}, shot ${k + 1} of 5`, seed + k, 512, 288, 90000));
-          } catch (e) { /* on tolère une frame manquée */ }
+            imgs.push(await loadAIImage(shotPrompt, seed, 640, 360, 75000));
+          } catch (e1) {
+            try { imgs.push(await loadAIImage(shotPrompt, seed + 1, 640, 360, 75000)); }
+            catch (e2) { /* plan raté, on continue */ }
+          }
         }
-        if (imgs.length < 2) throw new Error('trop de frames manquées');
-        wait.innerHTML = `<b>✓</b> ${imgs.length} images clés générées`;
+        if (imgs.length < 1) throw new Error('aucun plan généré');
+        wait.innerHTML = `<b>✓</b> ${imgs.length}/${SHOTS.length} plans générés (même seed → même univers visuel)`;
         aiStatusLine(true);
         playFrames(imgs);
         const meta = document.createElement('p');
@@ -1407,8 +1446,17 @@ async function generate() {
       let html = null;
       try {
         html = stripFences(await llm(
-          `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Exigences : design sombre premium (dégradés, glassmorphism), CSS dans <style>, textes français réalistes, animations au scroll (IntersectionObserver + transitions). Si le sujet s'y prête, intègre un objet 3D réel avec <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script> et <model-viewer style="width:100%;height:340px" src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb" camera-controls auto-rotate shadow-intensity="1"></model-viewer> (autres GLB dispo en remplaçant DamagedHelmet par Duck, ToyCar ou WaterBottle). Pas d'images externes autres que le GLB. Réponds UNIQUEMENT le code HTML, sans backticks.`, 60000, siteStatus));
+          sitePrompt(prompt, false), 60000, siteStatus));
         if (!/</.test(html || '')) throw new Error('sortie invalide');
+        if (!/<\/html>\s*$/i.test(html)) {
+          /* sortie tronquée par la limite du modèle : seconde passe plus courte */
+          siteStatus.innerHTML = '⚙ Sortie tronquée — régénération en version compacte…';
+          try {
+            const html2 = stripFences(await llm(sitePrompt(prompt, true), 60000, siteStatus));
+            if (/<\/html>\s*$/i.test(html2)) html = html2;
+          } catch (e) { /* on garde la première */ }
+        }
+        if (!/<\/html>\s*$/i.test(html)) html += '\n</body></html>';
         siteStatus.innerHTML = `<b>✓</b> HTML écrit par : ${lastLLMEngine}`;
       } catch (err) {
         siteStatus.innerHTML = '<b>⚠</b> Aucun moteur texte disponible — gabarit local rendu ci-dessous :';
