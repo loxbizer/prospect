@@ -702,6 +702,22 @@ const signupFormWrap = document.getElementById('signupFormWrap');
 const signupSuccess = document.getElementById('signupSuccess');
 let currentPlan = 'Découverte';
 
+let aiProbeDone = false;
+async function probeAI() {
+  if (aiProbeDone) return;
+  aiProbeDone = true;
+  const status = document.createElement('p');
+  status.className = 'play__pipe';
+  status.innerHTML = '⚙ Test de la connexion aux modèles…';
+  playOut.prepend(status);
+  try {
+    await llmOnce('ping', 8000);
+    status.innerHTML = '<b>✓</b> IA connectée — les générations seront réelles (modèles ouverts via pollinations.ai).';
+  } catch (e) {
+    status.innerHTML = '<b>⚠</b> Pas d\'accès réseau dans cet environnement : replis locaux. Ouvre <b>loxbizer.github.io/prospect/lumen</b> dans ton navigateur pour la génération réelle.';
+  }
+}
+
 function openModal(view, plan) {
   if (plan) { currentPlan = plan; signupPlanEl.textContent = plan; }
   viewSignup.hidden = view !== 'signup';
@@ -713,6 +729,7 @@ function openModal(view, plan) {
   gsap.fromTo(modal.querySelector('.modal__backdrop'), { opacity: 0 }, { opacity: 1, duration: 0.35 });
   const input = view === 'signup' ? document.getElementById('fName') : document.getElementById('playPrompt');
   setTimeout(() => input && input.focus(), 350);
+  if (view === 'play') probeAI();
 }
 function closeModal() {
   if (typeof cleanupLiveOutputs === 'function') cleanupLiveOutputs();
@@ -930,7 +947,7 @@ function aiStatusLine(ok) {
   playOut.appendChild(p);
 }
 
-async function llm(prompt, timeout = 35000) {
+async function llmOnce(prompt, timeout) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
@@ -941,6 +958,10 @@ async function llm(prompt, timeout = 35000) {
     return text;
   } finally { clearTimeout(timer); }
 }
+async function llm(prompt, timeout = 35000) {
+  try { return await llmOnce(prompt, timeout); }
+  catch (e) { return await llmOnce(prompt, timeout); }  /* seconde chance */
+}
 
 function aiImageUrl(prompt, seed, w = 768, h = 432) {
   return 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) +
@@ -950,7 +971,6 @@ function aiImageUrl(prompt, seed, w = 768, h = 432) {
 function loadImage(url, timeout = 60000) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
     const t = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, timeout);
     img.onload = () => { clearTimeout(t); resolve(img); };
     img.onerror = () => { clearTimeout(t); reject(new Error('chargement')); };
@@ -1218,12 +1238,19 @@ async function generate() {
       await pipeline(['Storyboard (4 plans)']);
       const wait = document.createElement('p');
       wait.className = 'play__pipe';
-      wait.innerHTML = '⚙ Génération des 4 images clés…';
+      wait.innerHTML = '⚙ Génération des images clés (0/3)…';
       playOut.appendChild(wait);
       try {
-        const imgs = await Promise.all([0, 1, 2, 3].map((k) =>
-          loadImage(aiImageUrl(`${prompt}, cinematic, plan ${k + 1} sur 4`, seed + k, 768, 432))));
-        wait.innerHTML = '<b>✓</b> 4 images clés générées';
+        /* séquentiel : l'API gratuite limite les requêtes parallèles */
+        const imgs = [];
+        for (let k = 0; k < 3; k++) {
+          wait.innerHTML = `⚙ Génération des images clés (${k}/3)… ~20 s chacune`;
+          try {
+            imgs.push(await loadImage(aiImageUrl(`${prompt}, cinematic film still, shot ${k + 1}`, seed + k, 512, 288), 90000));
+          } catch (e) { /* on tolère une frame manquée */ }
+        }
+        if (imgs.length < 2) throw new Error('trop de frames manquées');
+        wait.innerHTML = `<b>✓</b> ${imgs.length} images clés générées`;
         aiStatusLine(true);
         playFrames(imgs);
         const meta = document.createElement('p');
