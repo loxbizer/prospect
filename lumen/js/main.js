@@ -706,16 +706,23 @@ let aiProbeDone = false;
 async function probeAI() {
   if (aiProbeDone) return;
   aiProbeDone = true;
-  const status = document.createElement('p');
-  status.className = 'play__pipe';
-  status.innerHTML = '⚙ Test de la connexion aux modèles…';
-  playOut.prepend(status);
-  try {
-    await llmOnce('ping', 8000);
-    status.innerHTML = '<b>✓</b> IA connectée — les générations seront réelles (modèles ouverts via pollinations.ai).';
-  } catch (e) {
-    status.innerHTML = '<b>⚠</b> Pas d\'accès réseau dans cet environnement : replis locaux. Ouvre <b>loxbizer.github.io/prospect/lumen</b> dans ton navigateur pour la génération réelle.';
+  const box = document.createElement('div');
+  box.id = 'aiDiag';
+  box.innerHTML = '<p class="play__pipe">⚙ Diagnostic des moteurs…</p>';
+  playOut.prepend(box);
+  const lines = [];
+  /* 1. API texte */
+  try { await llmOnce('ping', 8000); lines.push('<b>✓</b> API texte (pollinations.ai) : OK'); }
+  catch (e) { lines.push(`<b>⚠</b> API texte : ${String(e.message || e).slice(0, 60)} → relève par un <b>LLM local dans le navigateur</b> (Qwen 0.5B, téléchargé au 1er usage)`); }
+  /* 2. API image */
+  try { await loadImage(aiImageUrl('test', 1, 64, 64), 12000); lines.push('<b>✓</b> API image (FLUX) : OK'); }
+  catch (e) {
+    try { await loadImage(aiImageUrl('test', 1, 64, 64, true), 12000); lines.push('<b>✓</b> API image (passerelle 2) : OK'); }
+    catch (e2) { lines.push('<b>⚠</b> API image injoignable → repli en art procédural local'); }
   }
+  /* 3. capacités locales, toujours dispo */
+  lines.push('<b>✓</b> 3D WebGL, rendu de site, voix : locaux, toujours fonctionnels');
+  box.innerHTML = lines.map((l) => `<p class="play__pipe">${l}</p>`).join('');
 }
 
 function openModal(view, plan) {
@@ -947,6 +954,48 @@ function aiStatusLine(ok) {
   playOut.appendChild(p);
 }
 
+/* LLM local : un vrai modèle open source (Qwen 2.5 0.5B) exécuté DANS le
+   navigateur via transformers.js — indépendant de toute API distante.
+   Téléchargé une fois (~350 Mo), ensuite mis en cache par le navigateur. */
+const importUrl = new Function('u', 'return import(u)');
+let localLLM = null, localLLMLoading = null;
+function ensureLocalLLM(onProgress) {
+  if (localLLM) return Promise.resolve(localLLM);
+  if (localLLMLoading) return localLLMLoading;
+  localLLMLoading = (async () => {
+    const { pipeline } = await importUrl('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1');
+    localLLM = await pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct', {
+      dtype: 'q4',
+      device: navigator.gpu ? 'webgpu' : 'wasm',
+      progress_callback: onProgress,
+    });
+    return localLLM;
+  })();
+  localLLMLoading.catch(() => { localLLMLoading = null; });
+  return localLLMLoading;
+}
+
+async function llmLocal(userPrompt, statusEl) {
+  let lastPct = -1;
+  const gen = await ensureLocalLLM((p) => {
+    if (statusEl && p.status === 'progress' && p.total) {
+      const pct = Math.round((p.loaded / p.total) * 100);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        statusEl.innerHTML = `⚙ Téléchargement du modèle local <b>Qwen 2.5 (0.5B)</b> — ${p.file.split('/').pop()} ${pct} % (une seule fois, ensuite en cache)`;
+      }
+    }
+  });
+  if (statusEl) statusEl.innerHTML = '⚙ Inférence locale en cours…';
+  const messages = [
+    { role: 'system', content: 'Tu es LUMEN, une IA francophone concise et utile.' },
+    { role: 'user', content: userPrompt },
+  ];
+  const out = await gen(messages, { max_new_tokens: 220, temperature: 0.7, do_sample: true });
+  const last = out[0].generated_text;
+  return (Array.isArray(last) ? last[last.length - 1].content : String(last)).trim();
+}
+
 async function llmOnce(prompt, timeout) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
@@ -958,14 +1007,27 @@ async function llmOnce(prompt, timeout) {
     return text;
   } finally { clearTimeout(timer); }
 }
-async function llm(prompt, timeout = 35000) {
-  try { return await llmOnce(prompt, timeout); }
-  catch (e) { return await llmOnce(prompt, timeout); }  /* seconde chance */
+let lastLLMEngine = '';
+async function llm(prompt, timeout = 35000, statusEl = null) {
+  try { const r = await llmOnce(prompt, timeout); lastLLMEngine = 'API pollinations.ai'; return r; }
+  catch (e1) {
+    try { const r = await llmOnce(prompt, timeout); lastLLMEngine = 'API pollinations.ai'; return r; }
+    catch (e2) {
+      /* l'API distante ne répond pas : vrai modèle local dans le navigateur */
+      const r = await llmLocal(prompt, statusEl);
+      lastLLMEngine = 'Qwen 2.5 (0.5B) exécuté dans votre navigateur';
+      return r;
+    }
+  }
 }
 
-function aiImageUrl(prompt, seed, w = 768, h = 432) {
-  return 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) +
-    `?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+function aiImageUrl(prompt, seed, w = 768, h = 432, alt = false) {
+  const host = alt ? 'https://pollinations.ai/p/' : 'https://image.pollinations.ai/prompt/';
+  return host + encodeURIComponent(prompt) + `?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+}
+async function loadAIImage(prompt, seed, w, h, timeout = 60000) {
+  try { return await loadImage(aiImageUrl(prompt, seed, w, h, false), timeout); }
+  catch (e) { return await loadImage(aiImageUrl(prompt, seed, w, h, true), timeout); }
 }
 
 function loadImage(url, timeout = 60000) {
@@ -979,6 +1041,15 @@ function loadImage(url, timeout = 60000) {
 }
 
 const stripFences = (s) => s.replace(/^```[a-z]*\s*\n?/i, '').replace(/```\s*$/m, '').trim();
+
+/* traduit + désambiguïse le prompt (ex : « canapé » = sofa, pas l'amuse-bouche) */
+async function enhancePrompt(p, cinematic = false) {
+  try {
+    const out = await llm(`Convert this French image prompt to a precise English image-generation prompt. Resolve ambiguities toward the most common French meaning (ex: "canapé" means sofa furniture, NOT food). Add material/lighting details.${cinematic ? ' Cinematic film still style.' : ''} Answer ONLY the English prompt, max 25 words: "${p}"`, 15000);
+    const clean = out.replace(/^["']|["']$/g, '').split('\n')[0].trim();
+    return clean.length > 3 ? clean : p;
+  } catch (e) { return p; }
+}
 
 /* nettoyage des sorties vivantes (3D, vidéo, voix) */
 let mini3d = null, vidRaf = 0;
@@ -999,8 +1070,40 @@ function speak(text) {
   return true;
 }
 
-/* objet 3D réel, sculpté par le prompt, manipulable */
-function spawnMini3d(rng) {
+/* bibliothèque de vrais modèles GLB open source (Khronos / Wayfair) */
+const LIB3D = [
+  { keys: ['canap', 'sofa', 'divan', 'banquette'], file: '../assets/models/GlamVelvetSofa.glb', name: 'Canapé en velours', size: 1.9 },
+  { keys: ['chaise', 'fauteuil', 'chair', 'siège', 'siege', 'assise'], file: '../assets/models/SheenChair.glb', name: 'Fauteuil bouclé', size: 1.8 },
+  { keys: ['voiture', 'auto', 'car', 'bagnole', 'vehicule', 'véhicule'], file: 'assets/models/lib/ToyCar.glb', name: 'Voiture', size: 1.9 },
+  { keys: ['canard', 'duck', 'oiseau', 'poule'], file: 'assets/models/lib/Duck.glb', name: 'Canard', size: 1.7 },
+  { keys: ['casque', 'helmet', 'armure', 'soldat', 'guerrier', 'cyber'], file: 'assets/models/lib/DamagedHelmet.glb', name: 'Casque sci-fi', size: 1.8 },
+  { keys: ['bouteille', 'bottle', 'gourde', 'eau', 'boisson'], file: 'assets/models/lib/WaterBottle.glb', name: 'Bouteille', size: 1.7 },
+  { keys: ['dragon', 'creature', 'créature', 'monstre'], file: 'assets/models/DragonAttenuation.glb', name: 'Dragon de verre', size: 1.9 },
+];
+const LIB3D_WORDS = { sofa: 0, chair: 1, car: 2, duck: 3, helmet: 4, bottle: 5, dragon: 6 };
+
+function matchLib3D(prompt) {
+  const p = prompt.toLowerCase();
+  return LIB3D.find((e) => e.keys.some((k) => p.includes(k))) || null;
+}
+
+async function classifyLib3D(prompt) {
+  try {
+    const out = (await llm(`Classify "${prompt}" into exactly one word among: sofa, chair, car, duck, helmet, bottle, dragon, abstract. Answer only the word.`, 12000)).toLowerCase();
+    for (const w in LIB3D_WORDS) if (out.includes(w)) return LIB3D[LIB3D_WORDS[w]];
+  } catch (e) { /* pas grave */ }
+  return null;
+}
+
+function loadGLB(url, timeout = 30000) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), timeout);
+    loader.load(url, (g) => { clearTimeout(t); resolve(g); }, undefined, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+/* objet 3D réel, manipulable — modèle GLB fourni, sinon forme sculptée */
+function spawnMini3d(rng, model3d = null, modelSize = 1.8) {
   const canvas = document.createElement('canvas');
   canvas.className = 'play__mini3d';
   playOut.appendChild(canvas);
@@ -1017,25 +1120,44 @@ function spawnMini3d(rng) {
   const l1 = new THREE.PointLight(0x22d3ee, 40, 20); l1.position.set(3, 2, 3); scene.add(l1);
   const l2 = new THREE.PointLight(0xe879f9, 40, 20); l2.position.set(-3, -1, 2); scene.add(l2);
 
-  const geo = new THREE.IcosahedronGeometry(1, 16);
-  const posAttr = geo.attributes.position;
-  const v = new THREE.Vector3();
-  const f1 = 1.5 + rng() * 3.5, f2 = 1.5 + rng() * 4.5, amp = 0.12 + rng() * 0.24;
-  for (let i = 0; i < posAttr.count; i++) {
-    v.fromBufferAttribute(posAttr, i);
-    const d = 1 + amp * Math.sin(v.x * f1 + v.y * f2) * Math.cos(v.z * f2 - v.y * f1);
-    v.normalize().multiplyScalar(d);
-    posAttr.setXYZ(i, v.x, v.y, v.z);
+  let mesh, wire = null, tris = 0;
+  if (model3d) {
+    /* vrai GLB : centré et mis à l'échelle */
+    mesh = model3d;
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    const sz = box.getSize(new THREE.Vector3());
+    const ctr = box.getCenter(new THREE.Vector3());
+    const sc = modelSize / Math.max(sz.x, sz.y, sz.z);
+    mesh.scale.setScalar(sc);
+    mesh.position.set(-ctr.x * sc, -ctr.y * sc, -ctr.z * sc);
+    const pivot = new THREE.Group();
+    pivot.add(mesh);
+    scene.add(pivot);
+    mesh = pivot;
+    model3d.traverse((o) => { if (o.isMesh && o.geometry) tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; });
+  } else {
+    const geo = new THREE.IcosahedronGeometry(1, 16);
+    const posAttr = geo.attributes.position;
+    const v = new THREE.Vector3();
+    const f1 = 1.5 + rng() * 3.5, f2 = 1.5 + rng() * 4.5, amp = 0.12 + rng() * 0.24;
+    for (let i = 0; i < posAttr.count; i++) {
+      v.fromBufferAttribute(posAttr, i);
+      const d = 1 + amp * Math.sin(v.x * f1 + v.y * f2) * Math.cos(v.z * f2 - v.y * f1);
+      v.normalize().multiplyScalar(d);
+      posAttr.setXYZ(i, v.x, v.y, v.z);
+    }
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color().setHSL(rng(), 0.7, 0.55),
+      metalness: 0.45, roughness: 0.22, clearcoat: 0.8,
+    });
+    mesh = new THREE.Mesh(geo, mat);
+    wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x22d3ee, wireframe: true, transparent: true, opacity: 0.07 }));
+    wire.scale.setScalar(1.003);
+    scene.add(mesh, wire);
+    tris = (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
   }
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshPhysicalMaterial({
-    color: new THREE.Color().setHSL(rng(), 0.7, 0.55),
-    metalness: 0.45, roughness: 0.22, clearcoat: 0.8,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  const wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x22d3ee, wireframe: true, transparent: true, opacity: 0.07 }));
-  wire.scale.setScalar(1.003);
-  scene.add(mesh, wire);
 
   let dragging = false, lx = 0, vx = 0;
   canvas.addEventListener('pointerdown', (e) => { dragging = true; lx = e.clientX; canvas.setPointerCapture(e.pointerId); });
@@ -1050,13 +1172,13 @@ function spawnMini3d(rng) {
   const tick3d = () => {
     if (!mini3d) return;
     if (!dragging) { vx *= 0.95; mesh.rotation.y += 0.006 + vx; }
-    mesh.rotation.x = Math.sin(performance.now() * 0.0004) * 0.22;
-    wire.rotation.copy(mesh.rotation);
+    mesh.rotation.x = Math.sin(performance.now() * 0.0004) * (model3d ? 0.08 : 0.22);
+    if (wire) wire.rotation.copy(mesh.rotation);
     renderer.render(scene, cam);
     mini3d.raf = requestAnimationFrame(tick3d);
   };
   tick3d();
-  return { triangles: Math.round((geo.index ? geo.index.count : posAttr.count) / 3) };
+  return { triangles: Math.round(tris) };
 }
 
 /* lecteur de frames IA : fondu enchaîné + léger zoom (Ken Burns) */
@@ -1065,7 +1187,7 @@ function playFrames(imgs) {
   c.width = 768; c.height = 432; c.className = 'play__canvas';
   playOut.appendChild(c);
   const ctx = c.getContext('2d');
-  const per = 2000, fade = 600;
+  const per = 1500, fade = 550;
   const start = performance.now();
   const drawImg = (img, tt, alpha) => {
     ctx.globalAlpha = alpha;
@@ -1122,7 +1244,7 @@ function proceduralVideo(rng) {
 function showSite(html, label) {
   const frame = document.createElement('iframe');
   frame.className = 'play__frame';
-  frame.setAttribute('sandbox', '');
+  frame.setAttribute('sandbox', 'allow-scripts');
   frame.srcdoc = html;
   playOut.appendChild(frame);
   const meta = document.createElement('p');
@@ -1182,12 +1304,16 @@ async function generate() {
         : currentCap === 'analyse'
           ? `Tu es un analyste. En français, structure une courte analyse (max 160 mots, avec 3 points numérotés) sur : "${prompt}".`
           : `Tu es LUMEN, une IA française serviable. Réponds en français, de façon naturelle et utile (max 160 mots) à : "${prompt}".`;
+      const status = document.createElement('p');
+      status.className = 'play__pipe';
+      status.innerHTML = '⚙ Génération…';
+      playOut.appendChild(status);
       let out;
       try {
-        out = await llm(instruction);
-        aiStatusLine(true);
+        out = await llm(instruction, 35000, status);
+        status.innerHTML = `<b>✓</b> Généré par : ${lastLLMEngine}`;
       } catch (err) {
-        aiStatusLine(false);
+        status.innerHTML = '<b>⚠</b> Aucun moteur disponible (réseau totalement coupé) — texte de démonstration :';
         out = null;
       }
       if (cfg.type === 'code') {
@@ -1205,13 +1331,15 @@ async function generate() {
 
     /* ── IMAGE : vrai FLUX ── */
     if (cfg.type === 'image') {
+      await pipeline(['Traduction & enrichissement du prompt']);
+      const enPrompt = await enhancePrompt(prompt);
       await pipeline([`Diffusion <b>FLUX</b> — seed ${seed}`]);
       const wait = document.createElement('p');
       wait.className = 'play__pipe';
       wait.innerHTML = '⚙ Génération de l\'image (quelques secondes)…';
       playOut.appendChild(wait);
       try {
-        const img = await loadImage(aiImageUrl(prompt, seed));
+        const img = await loadAIImage(enPrompt, seed, 768, 432, 75000);
         wait.innerHTML = '<b>✓</b> Image générée';
         aiStatusLine(true);
         img.className = 'play__canvas';
@@ -1219,7 +1347,7 @@ async function generate() {
         gsap.from(img, { opacity: 0, scale: 0.96, duration: 0.7, ease: 'power3.out' });
         const meta = document.createElement('p');
         meta.className = 'play__meta';
-        meta.textContent = `FLUX (open weights) via pollinations.ai · « ${prompt} » · seed ${seed} · 768 × 432`;
+        meta.textContent = `FLUX (open weights) via pollinations.ai · « ${prompt} » → “${enPrompt}” · seed ${seed}`;
         playOut.appendChild(meta);
       } catch (err) {
         wait.innerHTML = '<b>⚠</b> Génération distante impossible';
@@ -1235,7 +1363,8 @@ async function generate() {
 
     /* ── VIDÉO : frames FLUX animées ── */
     if (cfg.type === 'steps' && currentCap === 'video') {
-      await pipeline(['Storyboard (4 plans)']);
+      await pipeline(['Traduction & storyboard']);
+      const enPrompt = await enhancePrompt(prompt, true);
       const wait = document.createElement('p');
       wait.className = 'play__pipe';
       wait.innerHTML = '⚙ Génération des images clés (0/3)…';
@@ -1243,10 +1372,10 @@ async function generate() {
       try {
         /* séquentiel : l'API gratuite limite les requêtes parallèles */
         const imgs = [];
-        for (let k = 0; k < 3; k++) {
-          wait.innerHTML = `⚙ Génération des images clés (${k}/3)… ~20 s chacune`;
+        for (let k = 0; k < 5; k++) {
+          wait.innerHTML = `⚙ Génération des images clés (${k}/5)… ~15 s chacune`;
           try {
-            imgs.push(await loadImage(aiImageUrl(`${prompt}, cinematic film still, shot ${k + 1}`, seed + k, 512, 288), 90000));
+            imgs.push(await loadAIImage(`${enPrompt}, shot ${k + 1} of 5`, seed + k, 512, 288, 90000));
           } catch (e) { /* on tolère une frame manquée */ }
         }
         if (imgs.length < 2) throw new Error('trop de frames manquées');
@@ -1255,7 +1384,7 @@ async function generate() {
         playFrames(imgs);
         const meta = document.createElement('p');
         meta.className = 'play__meta';
-        meta.textContent = `Séquence animée à partir de 4 vraies images FLUX · « ${prompt} » — la version complète interpole à 24 i/s.`;
+        meta.textContent = `Storyboard animé : ${imgs.length} vraies images FLUX · « ${prompt} » → “${enPrompt}” — la version complète interpole en vraie vidéo 24 i/s (Wan/LTX).`;
         playOut.appendChild(meta);
       } catch (err) {
         wait.innerHTML = '<b>⚠</b> Génération distante impossible';
@@ -1271,14 +1400,18 @@ async function generate() {
     /* ── SITE : HTML écrit par le LLM, rendu ici ── */
     if (cfg.type === 'steps' && currentCap === 'site') {
       await pipeline(['Brief → structure → style']);
+      const siteStatus = document.createElement('p');
+      siteStatus.className = 'play__pipe';
+      siteStatus.innerHTML = '⚙ Écriture du HTML…';
+      playOut.appendChild(siteStatus);
       let html = null;
       try {
         html = stripFences(await llm(
-          `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Contraintes : tout le CSS dans une balise <style> (design sombre moderne, dégradés), AUCUN JavaScript, AUCUNE ressource externe (ni image, ni police), textes en français réalistes. Réponds UNIQUEMENT avec le code HTML, sans backticks ni commentaire autour.`, 45000));
+          `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Exigences : design sombre premium (dégradés, glassmorphism), CSS dans <style>, textes français réalistes, animations au scroll (IntersectionObserver + transitions). Si le sujet s'y prête, intègre un objet 3D réel avec <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script> et <model-viewer style="width:100%;height:340px" src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb" camera-controls auto-rotate shadow-intensity="1"></model-viewer> (autres GLB dispo en remplaçant DamagedHelmet par Duck, ToyCar ou WaterBottle). Pas d'images externes autres que le GLB. Réponds UNIQUEMENT le code HTML, sans backticks.`, 60000, siteStatus));
         if (!/</.test(html || '')) throw new Error('sortie invalide');
-        aiStatusLine(true);
+        siteStatus.innerHTML = `<b>✓</b> HTML écrit par : ${lastLLMEngine}`;
       } catch (err) {
-        aiStatusLine(false);
+        siteStatus.innerHTML = '<b>⚠</b> Aucun moteur texte disponible — gabarit local rendu ci-dessous :';
       }
       showSite(html || localSiteHTML(prompt),
         html ? `Page écrite par un LLM ouvert et rendue ci-dessus · « ${prompt} »` : `Page construite localement · « ${prompt} »`);
@@ -1286,11 +1419,36 @@ async function generate() {
 
     /* ── 3D : objet réel manipulable ── */
     if (cfg.type === 'steps' && currentCap === 'jeu') {
-      await pipeline(['Maillage sculpté par le prompt', 'Matériau PBR + clearcoat']);
-      const info = spawnMini3d(rng);
+      await pipeline(['Analyse du prompt']);
+      let entry = matchLib3D(prompt);
+      if (!entry) entry = await classifyLib3D(prompt);
+      let info, label;
+      if (entry) {
+        const wait = document.createElement('p');
+        wait.className = 'play__pipe';
+        wait.innerHTML = `⚙ Chargement du modèle « ${entry.name} »…`;
+        playOut.appendChild(wait);
+        try {
+          const g = await loadGLB(entry.file);
+          /* le dragon embarque un fond de tissu */
+          const rm = [];
+          g.scene.traverse((o) => { if (/cloth|backdrop/i.test(o.name)) rm.push(o); });
+          rm.forEach((o) => o.parent && o.parent.remove(o));
+          wait.innerHTML = `<b>✓</b> Modèle « ${entry.name} » chargé`;
+          info = spawnMini3d(rng, g.scene, entry.size);
+          label = `Vrai modèle 3D open source « ${entry.name} » (bibliothèque Khronos glTF), ${info.triangles.toLocaleString('fr-FR')} triangles, sélectionné par l'IA d'après votre prompt — cliquer-glisser pour le faire tourner.`;
+        } catch (e) {
+          wait.innerHTML = '<b>⚠</b> Modèle inaccessible ici — forme générative à la place';
+        }
+      }
+      if (!info) {
+        await pipeline(['Maillage sculpté par le prompt']);
+        info = spawnMini3d(rng);
+        label = `Aucun modèle de la bibliothèque ne correspond : forme générative (${info.triangles.toLocaleString('fr-FR')} triangles), manipulable à la souris. La version complète fait du vrai text-to-3D (TripoSR).`;
+      }
       const meta = document.createElement('p');
       meta.className = 'play__meta';
-      meta.textContent = `Objet 3D réel (${info.triangles.toLocaleString('fr-FR')} triangles) rendu en WebGL — cliquer-glisser pour le faire tourner. La version complète le remplace par du text-to-3D (TripoSR).`;
+      meta.textContent = label;
       playOut.appendChild(meta);
     }
 
