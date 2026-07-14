@@ -1072,15 +1072,16 @@ function speak(text) {
 
 /* bibliothèque de vrais modèles GLB open source (Khronos / Wayfair) */
 const LIB3D = [
+  { keys: ['personnage', 'humanoide', 'humanoïde', 'humain', 'avatar', 'character', 'joueur', 'perso', 'robot', 'androide', 'androïde', 'héros', 'heros'], file: 'assets/models/Xbot.glb', name: 'Personnage humanoïde', size: 2.0, kind: 'humanoid' },
   { keys: ['canap', 'sofa', 'divan', 'banquette'], file: '../assets/models/GlamVelvetSofa.glb', name: 'Canapé en velours', size: 1.9 },
   { keys: ['chaise', 'fauteuil', 'chair', 'siège', 'siege', 'assise'], file: '../assets/models/SheenChair.glb', name: 'Fauteuil bouclé', size: 1.8 },
-  { keys: ['voiture', 'auto', 'car', 'bagnole', 'vehicule', 'véhicule', 'gta', 'course', 'racing', 'taxi', 'route', 'conduite', 'drift'], file: 'assets/models/lib/ToyCar.glb', name: 'Voiture', size: 1.9 },
+  { keys: ['voiture', 'auto', 'car', 'bagnole', 'vehicule', 'véhicule', 'gta', 'course', 'racing', 'taxi', 'route', 'conduite', 'drift'], file: 'assets/models/lib/ToyCar.glb', name: 'Voiture', size: 1.9, kind: 'car' },
   { keys: ['canard', 'duck', 'oiseau', 'poule'], file: 'assets/models/lib/Duck.glb', name: 'Canard', size: 1.7 },
   { keys: ['casque', 'helmet', 'armure', 'soldat', 'guerrier', 'cyber', 'space', 'astronaute', 'combat', 'fps', 'guerre'], file: 'assets/models/lib/DamagedHelmet.glb', name: 'Casque sci-fi', size: 1.8 },
   { keys: ['bouteille', 'bottle', 'gourde', 'eau', 'boisson'], file: 'assets/models/lib/WaterBottle.glb', name: 'Bouteille', size: 1.7 },
-  { keys: ['dragon', 'creature', 'créature', 'monstre'], file: 'assets/models/DragonAttenuation.glb', name: 'Dragon de verre', size: 1.9 },
+  { keys: ['dragon', 'creature', 'créature', 'monstre'], file: 'assets/models/DragonAttenuation.glb', name: 'Dragon de verre', size: 1.9, kind: 'dragon' },
 ];
-const LIB3D_WORDS = { sofa: 0, chair: 1, car: 2, duck: 3, helmet: 4, bottle: 5, dragon: 6 };
+const LIB3D_WORDS = { humanoid: 0, sofa: 1, chair: 2, car: 3, duck: 4, helmet: 5, bottle: 6, dragon: 7 };
 
 function matchLib3D(prompt) {
   const p = prompt.toLowerCase();
@@ -1089,7 +1090,7 @@ function matchLib3D(prompt) {
 
 async function classifyLib3D(prompt) {
   try {
-    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: sofa, chair, car, duck, helmet, bottle, dragon, abstract. Answer ONLY one word.`, 12000)).toLowerCase();
+    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: humanoid, sofa, chair, car, duck, helmet, bottle, dragon, abstract. ("personnage/joueur/héros" → humanoid.) Answer ONLY one word.`, 12000)).toLowerCase();
     for (const w in LIB3D_WORDS) if (out.includes(w)) return LIB3D[LIB3D_WORDS[w]];
   } catch (e) { /* pas grave */ }
   return null;
@@ -1103,7 +1104,7 @@ function loadGLB(url, timeout = 30000) {
 }
 
 /* objet 3D réel, manipulable — modèle GLB fourni, sinon forme sculptée */
-function spawnMini3d(rng, model3d = null, modelSize = 1.8) {
+function spawnMini3d(rng, model3d = null, modelSize = 1.8, anims = null) {
   const canvas = document.createElement('canvas');
   canvas.className = 'play__mini3d';
   playOut.appendChild(canvas);
@@ -1168,9 +1169,19 @@ function spawnMini3d(rng, model3d = null, modelSize = 1.8) {
   });
   canvas.addEventListener('pointerup', () => { dragging = false; });
 
+  let miniMixer = null;
+  if (anims && anims.length && model3d) {
+    miniMixer = new THREE.AnimationMixer(model3d);
+    const clip = anims.find((a) => /idle/i.test(a.name)) || anims[0];
+    miniMixer.clipAction(clip).play();
+  }
+  let lastT = performance.now();
   mini3d = { renderer, raf: 0 };
   const tick3d = () => {
     if (!mini3d) return;
+    const nowT = performance.now();
+    if (miniMixer) miniMixer.update(Math.min((nowT - lastT) / 1000, 0.05));
+    lastT = nowT;
     if (!dragging) { vx *= 0.95; mesh.rotation.y += 0.006 + vx; }
     mesh.rotation.x = Math.sin(performance.now() * 0.0004) * (model3d ? 0.08 : 0.22);
     if (wire) wire.rotation.copy(mesh.rotation);
@@ -1179,6 +1190,142 @@ function spawnMini3d(rng, model3d = null, modelSize = 1.8) {
   };
   tick3d();
   return { triangles: Math.round(tris) };
+}
+
+/* ═══ CINÉMATIQUE 3D TEMPS RÉEL : map + acteur GLB + caméra de cinéma ═══ */
+async function cinematic3D(prompt, rng, entry) {
+  const wrap = document.createElement('div');
+  wrap.className = 'play__cine';
+  const canvas = document.createElement('canvas');
+  wrap.appendChild(canvas);
+  const barT = document.createElement('div'); barT.className = 'cine-bar cine-bar--t';
+  const barB = document.createElement('div'); barB.className = 'cine-bar cine-bar--b';
+  const label = document.createElement('span'); label.className = 'cine-label';
+  wrap.appendChild(barT); wrap.appendChild(barB); wrap.appendChild(label);
+  playOut.appendChild(wrap);
+
+  const W = Math.max(playOut.clientWidth - 4, 320), H = Math.round(W * 9 / 16);
+  wrap.style.height = H + 'px';
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(W, H, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.shadowMap.enabled = true;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x07051a);
+  scene.fog = new THREE.FogExp2(0x07051a, 0.03);
+  scene.environment = heroScene.environment;
+  const cam = new THREE.PerspectiveCamera(40, W / H, 0.1, 200);
+
+  /* map : sol réfléchissant + grille néon + immeubles low-poly seedés */
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(300, 300),
+    new THREE.MeshStandardMaterial({ color: 0x0a0716, metalness: 0.7, roughness: 0.45 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+  const grid = new THREE.GridHelper(300, 90, 0x22d3ee, 0x22d3ee);
+  grid.material.transparent = true; grid.material.opacity = 0.14;
+  scene.add(grid);
+  const bGeo = new THREE.BoxGeometry(1, 1, 1);
+  for (let i = 0; i < 46; i++) {
+    const bw = 2 + rng() * 4, bh = 3 + rng() * 14, bd = 2 + rng() * 4;
+    const b = new THREE.Mesh(bGeo, new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(0.7 + rng() * 0.1, 0.35, 0.09 + rng() * 0.06),
+      emissive: new THREE.Color().setHSL(rng() < 0.5 ? 0.55 : 0.83, 0.8, 0.1),
+      metalness: 0.5, roughness: 0.6,
+    }));
+    b.scale.set(bw, bh, bd);
+    const ang = rng() * Math.PI * 2, dist = 16 + rng() * 55;
+    b.position.set(Math.cos(ang) * dist, bh / 2, Math.sin(ang) * dist);
+    b.castShadow = true;
+    scene.add(b);
+  }
+  const key = new THREE.SpotLight(0xbfd8ff, 250, 120, Math.PI / 4, 0.5, 1.4);
+  key.position.set(18, 30, 12); key.castShadow = true; key.shadow.mapSize.set(1024, 1024);
+  scene.add(key);
+  scene.add(new THREE.AmbientLight(0x201a38, 2.4));
+  const neonA = new THREE.PointLight(0x22d3ee, 120, 60, 1.6); neonA.position.set(-12, 4, -8); scene.add(neonA);
+  const neonB = new THREE.PointLight(0xe879f9, 120, 60, 1.6); neonB.position.set(12, 4, 8); scene.add(neonB);
+
+  /* acteur */
+  const g = await loadGLB(entry.file);
+  const rm = [];
+  g.scene.traverse((o) => { if (/cloth|backdrop/i.test(o.name)) rm.push(o); if (o.isMesh) o.castShadow = true; });
+  rm.forEach((o) => o.parent && o.parent.remove(o));
+  const actorSize = entry.kind === 'car' ? 3.2 : entry.kind === 'humanoid' ? 1.9 : 2.6;
+  const inner = g.scene;
+  inner.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(inner);
+  const sz = box.getSize(new THREE.Vector3()); const ctr = box.getCenter(new THREE.Vector3());
+  const sc = actorSize / Math.max(sz.x, sz.y, sz.z);
+  inner.scale.setScalar(sc);
+  inner.position.set(-ctr.x * sc, -box.min.y * sc, -ctr.z * sc);
+  const actor = new THREE.Group();
+  actor.add(inner);
+  scene.add(actor);
+  let mixer = null;
+  if (g.animations && g.animations.length) {
+    mixer = new THREE.AnimationMixer(inner);
+    const run = g.animations.find((a) => /run/i.test(a.name)) || g.animations.find((a) => /walk|idle/i.test(a.name)) || g.animations[0];
+    mixer.clipAction(run).play();
+  }
+
+  /* trajectoire + caméras */
+  const SHOT_LEN = 3.4;
+  const SHOTS_N = 4;
+  const pathPos = (t) => {
+    const w = entry.kind === 'car' ? 0.55 : entry.kind === 'humanoid' ? 0.35 : 0.3;
+    const rx = entry.kind === 'car' ? 11 : 7, rz = entry.kind === 'car' ? 7 : 7;
+    const y = entry.kind === 'dragon' ? 3 + Math.sin(t * 1.1) * 1.2 : 0;
+    return new THREE.Vector3(Math.cos(t * w) * rx, y, Math.sin(t * w * (entry.kind === 'car' ? 1.6 : 1)) * rz);
+  };
+  const start = performance.now();
+  let lastT = start;
+  mini3d = { renderer, raf: 0 };
+  const _p = new THREE.Vector3(), _p2 = new THREE.Vector3();
+  const tickCine = () => {
+    if (!mini3d) return;
+    const now = performance.now();
+    const t = (now - start) / 1000;
+    const dt = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now;
+    if (mixer) mixer.update(dt);
+    /* position + cap de l'acteur */
+    _p.copy(pathPos(t));
+    _p2.copy(pathPos(t + 0.06));
+    actor.position.copy(_p);
+    actor.lookAt(_p2.x, _p.y, _p2.z);
+    if (entry.kind === 'car') {
+      const drift = Math.sin(t * 1.7) * 0.4;               /* dérapages */
+      actor.rotation.y += drift;
+      inner.rotation.z = Math.sin(t * 1.7) * 0.07;          /* roulis */
+    }
+    /* plans caméra : coupes franches toutes les SHOT_LEN secondes */
+    const shot = Math.floor(t / SHOT_LEN) % SHOTS_N;
+    const st = (t % SHOT_LEN) / SHOT_LEN;
+    const heading = Math.atan2(_p2.x - _p.x, _p2.z - _p.z);
+    if (shot === 0) {          /* poursuite arrière */
+      cam.position.set(_p.x - Math.sin(heading) * 6, _p.y + 2.2, _p.z - Math.cos(heading) * 6);
+    } else if (shot === 1) {   /* travelling latéral bas */
+      cam.position.set(_p.x + Math.cos(heading) * 4.5, _p.y + 0.7, _p.z - Math.sin(heading) * 4.5);
+    } else if (shot === 2) {   /* contre-plongée frontale, l'acteur passe devant */
+      const ahead = pathPos(Math.floor(t / SHOT_LEN) * SHOT_LEN + SHOT_LEN * 0.7);
+      cam.position.set(ahead.x, 0.5, ahead.z + 2.5);
+    } else {                   /* grue large */
+      cam.position.set(Math.cos(t * 0.15) * 13, 6 + st * 2.5, Math.sin(t * 0.15) * 13);
+    }
+    cam.lookAt(_p.x, _p.y + 0.8, _p.z);
+    label.textContent = 'PLAN ' + (shot + 1) + '/' + SHOTS_N + ' · CINÉMATIQUE 3D TEMPS RÉEL';
+    neonA.intensity = 110 + Math.sin(t * 2.4) * 40;
+    neonB.intensity = 110 + Math.cos(t * 1.9) * 40;
+    renderer.render(scene, cam);
+    mini3d.raf = requestAnimationFrame(tickCine);
+  };
+  tickCine();
 }
 
 /* lecteur façon bande-annonce : coupes franches, zoom lent, letterbox, grain */
@@ -1299,6 +1446,55 @@ function sitePrompt(prompt, compact) {
   return `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Exigences : design sombre premium (dégradés, glassmorphism), CSS compact dans <style>, textes français courts et réalistes, animations au scroll (IntersectionObserver + transitions CSS). Intègre un objet 3D réel : <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script> puis <model-viewer style="width:100%;height:320px" src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb" camera-controls auto-rotate></model-viewer> (GLB au choix : DamagedHelmet, Duck, ToyCar, WaterBottle — adapte au sujet). Pas d'autres ressources externes. IMPÉRATIF : ${compact ? 'MAXIMUM 90 lignes, ' : 'sois compact (max 140 lignes), '}la réponse doit se terminer par </html>. Réponds UNIQUEMENT le code HTML, sans backticks.`;
 }
 
+function localGameHTML(prompt) {
+  const title = (prompt.charAt(0).toUpperCase() + prompt.slice(1)).replace(/[<>&"]/g, '');
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#06040f;font-family:system-ui,sans-serif;color:#fff}
+  canvas{display:block;width:100vw;height:100vh}
+  #ui{position:fixed;top:10px;left:12px;font-weight:700;text-shadow:0 0 8px #8b5cf6}
+  #msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(6,4,15,.82);cursor:pointer;text-align:center}
+  #msg h1{font-size:2rem;background:linear-gradient(100deg,#22d3ee,#8b5cf6,#e879f9);-webkit-background-clip:text;background-clip:text;color:transparent;margin:0 0 10px}
+  #msg p{color:#9d97b8;margin:4px}
+  </style></head><body>
+  <canvas id="c"></canvas><div id="ui">SCORE 0 · VIES 3</div>
+  <div id="msg"><h1>${title}</h1><p>Flèches / ZQSD : bouger · Souris : viser · Clic : tirer</p><p><b>CLIQUE POUR JOUER</b></p></div>
+  <script>
+  const cv=document.getElementById('c'),x=cv.getContext('2d'),ui=document.getElementById('ui'),msg=document.getElementById('msg');
+  let W,H;function rs(){W=cv.width=innerWidth;H=cv.height=innerHeight}rs();addEventListener('resize',rs);
+  const P={x:innerWidth/2,y:innerHeight/2,r:14,s:4.2},K={},B=[],E=[],PT=[];
+  let mx=0,my=0,score=0,lives=3,run=false,spawn=0;
+  addEventListener('keydown',e=>K[e.key.toLowerCase()]=1);addEventListener('keyup',e=>K[e.key.toLowerCase()]=0);
+  addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY});
+  addEventListener('mousedown',()=>{if(!run)return;const a=Math.atan2(my-P.y,mx-P.x);B.push({x:P.x,y:P.y,vx:Math.cos(a)*9,vy:Math.sin(a)*9})});
+  msg.addEventListener('click',()=>{run=true;score=0;lives=3;E.length=0;B.length=0;P.x=W/2;P.y=H/2;msg.style.display='none'});
+  function boom(x0,y0,c){for(let i=0;i<14;i++)PT.push({x:x0,y:y0,vx:(Math.random()-.5)*6,vy:(Math.random()-.5)*6,l:26,c})}
+  function loop(){
+    x.fillStyle='rgba(6,4,15,.32)';x.fillRect(0,0,W,H);
+    if(run){
+      if(K.arrowleft||K.q)P.x-=P.s;if(K.arrowright||K.d)P.x+=P.s;
+      if(K.arrowup||K.z)P.y-=P.s;if(K.arrowdown||K.s)P.y+=P.s;
+      P.x=Math.max(P.r,Math.min(W-P.r,P.x));P.y=Math.max(P.r,Math.min(H-P.r,P.y));
+      if(++spawn>Math.max(28,90-score))
+        {spawn=0;const side=Math.random()*4|0;E.push({x:side<2?(side?W+20:-20):Math.random()*W,y:side>1?(side>2?H+20:-20):Math.random()*H,r:12+Math.random()*10})}
+      E.forEach(e=>{const a=Math.atan2(P.y-e.y,P.x-e.x);e.x+=Math.cos(a)*(1.3+score/120);e.y+=Math.sin(a)*(1.3+score/120)});
+      B.forEach(b=>{b.x+=b.vx;b.y+=b.vy});
+      for(let i=E.length-1;i>=0;i--){const e=E[i];
+        for(let j=B.length-1;j>=0;j--){const b=B[j];
+          if((e.x-b.x)**2+(e.y-b.y)**2<e.r*e.r){E.splice(i,1);B.splice(j,1);score+=10;boom(e.x,e.y,'#e879f9');break}}
+        if(e&&(e.x-P.x)**2+(e.y-P.y)**2<(e.r+P.r)**2){E.splice(i,1);lives--;boom(P.x,P.y,'#22d3ee');
+          if(lives<=0){run=false;msg.style.display='flex';msg.querySelector('p b').textContent='GAME OVER — SCORE '+score+' · CLIQUE POUR REJOUER'}}}
+      ui.textContent='SCORE '+score+' · VIES '+lives;
+    }
+    x.fillStyle='#22d3ee';x.beginPath();x.arc(P.x,P.y,P.r,0,7);x.fill();
+    x.strokeStyle='#8b5cf6';x.beginPath();x.moveTo(P.x,P.y);x.lineTo(P.x+(mx-P.x)*.12,P.y+(my-P.y)*.12);x.stroke();
+    x.fillStyle='#e879f9';E.forEach(e=>{x.beginPath();x.arc(e.x,e.y,e.r,0,7);x.fill()});
+    x.fillStyle='#fff';B.forEach(b=>{x.beginPath();x.arc(b.x,b.y,3,0,7);x.fill()});
+    for(let i=PT.length-1;i>=0;i--){const p=PT[i];p.x+=p.vx;p.y+=p.vy;p.l--;x.globalAlpha=p.l/26;x.fillStyle=p.c;x.fillRect(p.x,p.y,3,3);x.globalAlpha=1;if(p.l<=0)PT.splice(i,1)}
+    requestAnimationFrame(loop);
+  }loop();
+  <\/script></body></html>`;
+}
+
 function localSiteHTML(prompt) {
   const title = prompt.charAt(0).toUpperCase() + prompt.slice(1);
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
@@ -1397,6 +1593,26 @@ async function generate() {
 
     /* ── VIDÉO : frames FLUX animées ── */
     if (cfg.type === 'steps' && currentCap === 'video') {
+      await pipeline(['Analyse de la scène']);
+      let cineEntry = matchLib3D(prompt);
+      if (!cineEntry) cineEntry = await classifyLib3D(prompt);
+      if (cineEntry) {
+        const wait0 = document.createElement('p');
+        wait0.className = 'play__pipe';
+        wait0.innerHTML = `⚙ Construction de la map 3D + chargement de « ${cineEntry.name} »…`;
+        playOut.appendChild(wait0);
+        try {
+          await cinematic3D(prompt, rng, cineEntry);
+          wait0.innerHTML = `<b>✓</b> Plan-séquence 3D en cours — « ${cineEntry.name} » filmé en temps réel`;
+          const meta = document.createElement('p');
+          meta.className = 'play__meta';
+          meta.textContent = `Vraie cinématique 3D rendue en direct dans votre navigateur : map générée (seed du prompt), « ${cineEntry.name} » animé, 4 plans caméra (poursuite, travelling, contre-plongée, grue) avec coupes franches. Aucune photo.`;
+          playOut.appendChild(meta);
+          return;
+        } catch (e) {
+          wait0.innerHTML = '<b>⚠</b> Scène 3D indisponible — repli storyboard';
+        }
+      }
       await pipeline(['Traduction & storyboard']);
       const enPrompt = await enhancePrompt(prompt, true);
       const wait = document.createElement('p');
@@ -1438,6 +1654,26 @@ async function generate() {
 
     /* ── SITE : HTML écrit par le LLM, rendu ici ── */
     if (cfg.type === 'steps' && currentCap === 'site') {
+      const GAMEY = /\bjeu\b|game|fortnite|jouable|shooter|arcade|plateforme|fps|battle/i;
+      if (GAMEY.test(prompt)) {
+        await pipeline(['Game design → boucle de jeu']);
+        const gameStatus = document.createElement('p');
+        gameStatus.className = 'play__pipe';
+        gameStatus.innerHTML = '⚙ Écriture du jeu…';
+        playOut.appendChild(gameStatus);
+        let ghtml = null;
+        try {
+          ghtml = stripFences(await llm(`Crée un MINI-JEU HTML5 JOUABLE sur le thème "${prompt}" : une page HTML complète avec <canvas> plein écran, un joueur déplaçable (flèches/ZQSD), tir vers la souris au clic, ennemis qui apparaissent et poursuivent, score et vies affichés, écran "clique pour jouer", game over avec rejouer. Style néon sombre. Tout le JS inline, AUCUNE ressource externe. IMPÉRATIF : max 130 lignes et termine par </html>. Réponds UNIQUEMENT le HTML.`, 60000, gameStatus));
+          if (!/<canvas/i.test(ghtml) || !/<\/html>\s*$/i.test(ghtml)) throw new Error('jeu invalide');
+          gameStatus.innerHTML = `<b>✓</b> Jeu écrit par : ${lastLLMEngine}`;
+        } catch (e) {
+          ghtml = null;
+          gameStatus.innerHTML = '<b>✓</b> Jeu généré par le moteur local LUMEN';
+        }
+        showSite(ghtml || localGameHTML(prompt),
+          'Mini-jeu JOUABLE rendu ci-dessus — clique dedans puis flèches/ZQSD pour bouger, souris pour tirer.');
+        return;
+      }
       await pipeline(['Brief → structure → style']);
       const siteStatus = document.createElement('p');
       siteStatus.className = 'play__pipe';
@@ -1483,7 +1719,7 @@ async function generate() {
           g.scene.traverse((o) => { if (/cloth|backdrop/i.test(o.name)) rm.push(o); });
           rm.forEach((o) => o.parent && o.parent.remove(o));
           wait.innerHTML = `<b>✓</b> Modèle « ${entry.name} » chargé`;
-          info = spawnMini3d(rng, g.scene, entry.size);
+          info = spawnMini3d(rng, g.scene, entry.size, g.animations);
           label = `Vrai modèle 3D open source « ${entry.name} » (bibliothèque Khronos glTF), ${info.triangles.toLocaleString('fr-FR')} triangles, sélectionné par l'IA d'après votre prompt — cliquer-glisser pour le faire tourner.`;
         } catch (e) {
           wait.innerHTML = '<b>⚠</b> Modèle inaccessible ici — forme générative à la place';
