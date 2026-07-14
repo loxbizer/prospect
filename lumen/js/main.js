@@ -380,42 +380,49 @@ document.querySelectorAll('.chip[data-emote]').forEach((chip) => {
 
 /* ═══════════════ SCÈNE MOTEUR : LE DRAGON ═══════════════ */
 const dragonCanvas = document.getElementById('dragonCanvas');
-const dragonRenderer = makeRenderer(dragonCanvas);
-const dragonScene = new THREE.Scene();
-dragonScene.fog = new THREE.FogExp2(BG, 0.05);
-const dragonPMREM = new THREE.PMREMGenerator(dragonRenderer);
-dragonScene.environment = dragonPMREM.fromScene(new RoomEnvironment(), 0.04).texture;
+/* créée SEULEMENT à l'approche de la section : un 2e contexte WebGL + un
+   environnement PMREM au chargement gelaient la page sur machines chargées */
+let dragonRenderer = null, dragonScene = null, dragonCamera = null,
+    dragonFX = null, dragonGroup = null, dragonKey = null, dragonRim = null;
 
-const dragonCamera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
-dragonCamera.position.set(0, 0.4, 6.2);
-
-const dragonKey = new THREE.SpotLight(0x22d3ee, 150, 40, Math.PI / 4.5, 0.55, 1.8);
-dragonKey.position.set(4, 6, 5);
-dragonKey.castShadow = true;
-dragonKey.shadow.mapSize.set(1024, 1024);
-dragonKey.shadow.bias = -0.0002;
-dragonScene.add(dragonKey);
-const dragonRim = new THREE.PointLight(0xe879f9, 80, 30, 1.6);
-dragonRim.position.set(-3, 1.5, -3);
-dragonScene.add(dragonRim);
-dragonScene.add(new THREE.AmbientLight(0x201a38, 3));
-
-const dragonFloor = new THREE.Mesh(
-  new THREE.CircleGeometry(14, 64),
-  new THREE.MeshStandardMaterial({ color: 0x0a0716, metalness: 0.85, roughness: 0.35 })
-);
-dragonFloor.rotation.x = -Math.PI / 2;
-dragonFloor.position.y = FLOOR_Y;
-dragonFloor.receiveShadow = true;
-dragonScene.add(dragonFloor);
-dragonScene.add(makeParticles(260, 18, 0.04, 0xe879f9));
-
-const dragonFX = makeComposer(dragonRenderer, dragonScene, dragonCamera, 0.5, 0.65, 0.85);
-const dragonGroup = new THREE.Group();
-dragonScene.add(dragonGroup);
+function initDragonScene() {
+  if (dragonRenderer) return;
+  dragonRenderer = makeRenderer(dragonCanvas);
+  dragonScene = new THREE.Scene();
+  dragonScene.fog = new THREE.FogExp2(BG, 0.05);
+  const dragonPMREM = new THREE.PMREMGenerator(dragonRenderer);
+  dragonScene.environment = dragonPMREM.fromScene(new RoomEnvironment(), 0.04).texture;
+  dragonCamera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
+  dragonCamera.position.set(0, 0.4, 6.2);
+  dragonCamera.lookAt(0, 0, 0);
+  dragonKey = new THREE.SpotLight(0x22d3ee, 150, 40, Math.PI / 4.5, 0.55, 1.8);
+  dragonKey.position.set(4, 6, 5);
+  dragonKey.castShadow = true;
+  dragonKey.shadow.mapSize.set(1024, 1024);
+  dragonKey.shadow.bias = -0.0002;
+  dragonScene.add(dragonKey);
+  dragonRim = new THREE.PointLight(0xe879f9, 80, 30, 1.6);
+  dragonRim.position.set(-3, 1.5, -3);
+  dragonScene.add(dragonRim);
+  dragonScene.add(new THREE.AmbientLight(0x201a38, 3));
+  const dragonFloor = new THREE.Mesh(
+    new THREE.CircleGeometry(14, 64),
+    new THREE.MeshStandardMaterial({ color: 0x0a0716, metalness: 0.85, roughness: 0.35 })
+  );
+  dragonFloor.rotation.x = -Math.PI / 2;
+  dragonFloor.position.y = FLOOR_Y;
+  dragonFloor.receiveShadow = true;
+  dragonScene.add(dragonFloor);
+  dragonScene.add(makeParticles(260, 18, 0.04, 0xe879f9));
+  dragonFX = makeComposer(dragonRenderer, dragonScene, dragonCamera, 0.5, 0.65, 0.85);
+  dragonGroup = new THREE.Group();
+  dragonScene.add(dragonGroup);
+  layoutDragon();
+}
 let dragonLoaded = false;
 
 function layoutDragon() {
+  if (!dragonRenderer) return;
   const w = dragonCanvas.clientWidth, h = dragonCanvas.clientHeight;
   if (!w || !h) return;
   dragonRenderer.setSize(w, h, false);
@@ -423,13 +430,13 @@ function layoutDragon() {
   dragonCamera.aspect = w / h;
   dragonCamera.updateProjectionMatrix();
 }
-layoutDragon();
 
 ScrollTrigger.create({
   trigger: '#moteur',
   start: 'top 140%',
   once: true,
   onEnter: () => {
+    initDragonScene();
     loader.load('assets/models/DragonAttenuation.glb', (gltf) => {
       const model = gltf.scene;
       /* le GLB embarque un fond de tissu : on le retire AVANT le centrage
@@ -501,7 +508,7 @@ function tick() {
     heroFX.composer.render();
   }
 
-  if (dragonVisible) {
+  if (dragonVisible && dragonRenderer) {
     if (dragonLoaded) {
       dragonGroup.rotation.y += (dragonDrive.rotY - dragonGroup.rotation.y) * 4 * dt;
       dragonGroup.position.y = Math.sin(t * 0.8) * 0.05;
@@ -1321,9 +1328,10 @@ const LIB3D = [
   { keys: ['casque', 'helmet', 'armure', 'soldat', 'guerrier', 'cyber', 'space', 'astronaute', 'combat', 'fps', 'guerre'], file: 'assets/models/lib/DamagedHelmet.glb', name: 'Casque sci-fi', size: 1.8 },
   { keys: ['bouteille', 'bottle', 'gourde', 'eau', 'boisson'], file: 'assets/models/lib/WaterBottle.glb', name: 'Bouteille', size: 1.7 },
   { keys: ['dragon', 'creature', 'créature', 'monstre'], file: 'assets/models/DragonAttenuation.glb', name: 'Dragon de verre', size: 1.9, kind: 'dragon' },
-  { keys: ['loup', 'renard', 'fox', 'chien', 'animal'], file: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb', name: 'Renard (animal animé)', size: 1.9, kind: 'humanoid' },
+  { keys: ['loup', 'louve'], file: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb', name: 'Loup (approché : renard animé recoloré gris — pas de loup dans les bibliothèques GLB libres)', size: 1.9, kind: 'humanoid', tint: 0x8d97a8 },
+  { keys: ['renard', 'fox', 'chien', 'animal'], file: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb', name: 'Renard (animal animé)', size: 1.9, kind: 'humanoid' },
 ];
-const LIB3D_WORDS = { robot: 0, human: 1, sofa: 2, chair: 3, car: 4, duck: 5, helmet: 6, bottle: 7, dragon: 8, fox: 9 };
+const LIB3D_WORDS = { robot: 0, human: 1, sofa: 2, chair: 3, car: 4, duck: 5, helmet: 6, bottle: 7, dragon: 8, fox: 10 };
 
 function matchLib3D(prompt) {
   const p = prompt.toLowerCase();
@@ -1680,8 +1688,12 @@ async function cinematic3D(prompt, rng, entry) {
     if (o.isMesh) o.castShadow = true;
   });
   rm.forEach((o) => o.parent && o.parent.remove(o));
+  if (entry.tint) g.scene.traverse((o) => {
+    if (o.isMesh && o.material) { o.material = o.material.clone(); o.material.color.set(entry.tint); }
+  });
   const actorSize = entry.kind === 'car' ? 3.2 : entry.kind === 'humanoid' ? 1.9 : 2.6;
   const inner = g.scene;
+  if (entry.kind === 'humanoid') inner.rotation.y = Math.PI; /* Mixamo regarde -Z : sinon il court à l'envers */
   inner.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(inner);
   const sz = box.getSize(new THREE.Vector3()); const ctr = box.getCenter(new THREE.Vector3());
@@ -2246,6 +2258,9 @@ async function generate() {
           const rm = [];
           g.scene.traverse((o) => { if (/cloth|backdrop/i.test(o.name) || (/ToyCar/.test(kwEntry.file) && /^(fabric|glass)$/i.test(o.name))) rm.push(o); });
           rm.forEach((o) => o.parent && o.parent.remove(o));
+          if (kwEntry.tint) g.scene.traverse((o) => {
+            if (o.isMesh && o.material) { o.material = o.material.clone(); o.material.color.set(kwEntry.tint); }
+          });
           info = spawnMini3d(rng, g.scene, kwEntry.size || 1.8, g.animations);
           label = `Vrai modèle 3D « ${kwEntry.name} » (${info.triangles.toLocaleString('fr-FR')} triangles) — cliquer-glisser pour le faire tourner.`;
         } catch (e) { catStatus.innerHTML = `<b>⚠</b> « ${kwEntry.name} » inaccessible — recherche IA`; }
