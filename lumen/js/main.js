@@ -1000,9 +1000,16 @@ async function llmOnce(prompt, timeout) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt), { signal: ctrl.signal });
+    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=mistral', { signal: ctrl.signal });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    const text = (await r.text()).trim();
+    let text = (await r.text()).trim();
+    /* certaines passerelles renvoient un objet {role, content, reasoning…} brut */
+    if (text.startsWith('{')) {
+      const j = JSON.parse(text); /* si ça casse → catch → moteur suivant */
+      text = (j.content
+        || (j.choices && j.choices[0] && (j.choices[0].message && j.choices[0].message.content || j.choices[0].text))
+        || (j.message && j.message.content) || '').trim();
+    }
     if (!text) throw new Error('réponse vide');
     return text;
   } finally { clearTimeout(timer); }
@@ -1072,7 +1079,8 @@ function speak(text) {
 
 /* bibliothèque de vrais modèles GLB open source (Khronos / Wayfair) */
 const LIB3D = [
-  { keys: ['personnage', 'humanoide', 'humanoïde', 'humain', 'avatar', 'character', 'joueur', 'perso', 'robot', 'androide', 'androïde', 'héros', 'heros'], file: 'assets/models/Xbot.glb', name: 'Personnage humanoïde', size: 2.0, kind: 'humanoid' },
+  { keys: ['robot', 'androide', 'androïde', 'cyborg', 'droïde', 'droide', 'mecha'], file: 'assets/models/Xbot.glb', name: 'Robot humanoïde', size: 2.0, kind: 'humanoid' },
+  { keys: ['humain', 'homme', 'femme', 'personne', 'personnage', 'soldat', 'humanoide', 'humanoïde', 'avatar', 'character', 'joueur', 'perso', 'héros', 'heros', 'realiste', 'réaliste'], file: 'assets/models/lib/Soldier.glb', name: 'Humain réaliste (soldat)', size: 2.0, kind: 'humanoid' },
   { keys: ['canap', 'sofa', 'divan', 'banquette'], file: '../assets/models/GlamVelvetSofa.glb', name: 'Canapé en velours', size: 1.9 },
   { keys: ['chaise', 'fauteuil', 'chair', 'siège', 'siege', 'assise'], file: '../assets/models/SheenChair.glb', name: 'Fauteuil bouclé', size: 1.8 },
   { keys: ['voiture', 'auto', 'car', 'bagnole', 'vehicule', 'véhicule', 'gta', 'course', 'racing', 'taxi', 'route', 'conduite', 'drift'], file: 'assets/models/lib/ToyCar.glb', name: 'Voiture', size: 1.9, kind: 'car' },
@@ -1081,7 +1089,7 @@ const LIB3D = [
   { keys: ['bouteille', 'bottle', 'gourde', 'eau', 'boisson'], file: 'assets/models/lib/WaterBottle.glb', name: 'Bouteille', size: 1.7 },
   { keys: ['dragon', 'creature', 'créature', 'monstre'], file: 'assets/models/DragonAttenuation.glb', name: 'Dragon de verre', size: 1.9, kind: 'dragon' },
 ];
-const LIB3D_WORDS = { humanoid: 0, sofa: 1, chair: 2, car: 3, duck: 4, helmet: 5, bottle: 6, dragon: 7 };
+const LIB3D_WORDS = { robot: 0, human: 1, sofa: 2, chair: 3, car: 4, duck: 5, helmet: 6, bottle: 7, dragon: 8 };
 
 function matchLib3D(prompt) {
   const p = prompt.toLowerCase();
@@ -1090,10 +1098,53 @@ function matchLib3D(prompt) {
 
 async function classifyLib3D(prompt) {
   try {
-    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: humanoid, sofa, chair, car, duck, helmet, bottle, dragon, abstract. ("personnage/joueur/héros" → humanoid.) Answer ONLY one word.`, 12000)).toLowerCase();
+    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: robot, human, sofa, chair, car, duck, helmet, bottle, dragon, abstract. ("robot/android" → robot, "humain/personnage réaliste" → human.) Answer ONLY one word.`, 12000)).toLowerCase();
     for (const w in LIB3D_WORDS) if (out.includes(w)) return LIB3D[LIB3D_WORDS[w]];
   } catch (e) { /* pas grave */ }
   return null;
+}
+
+/* catalogue complet Khronos, récupéré en direct (≈60 vrais GLB) */
+let catalogPromise = null;
+function fetchCatalog() {
+  if (catalogPromise) return catalogPromise;
+  catalogPromise = (async () => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 9000);
+    const r = await fetch('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/model-index.json', { signal: ctrl.signal });
+    clearTimeout(t);
+    const idx = await r.json();
+    const bad = /Test|Compare|Box|Cube|Interleaved|Unicode|Morph|Simple|Triangle|Unlit|NonPowerOfTwo|VertexColors|AnimationPointer|MultiUV|MultipleScenes|NegativeScale|NodePerformance|RecursiveSkeletons|TextureCoordinate|TextureEncoding|TextureLinear|TextureSettings|TextureTransform|PrimitiveMode|Xmp|Rigged|Pointer|Accessor|Instancing|Interpolation/i;
+    const cat = idx
+      .filter((m) => m.variants && m.variants['glTF-Binary'] && !bad.test(m.name))
+      .map((m) => ({ id: m.name, file: `https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/${m.name}/glTF-Binary/${m.variants['glTF-Binary']}` }));
+    /* extras locaux : humains/robots riggés */
+    cat.unshift(
+      { id: 'Soldier', file: 'assets/models/lib/Soldier.glb', label: 'humain réaliste animé' },
+      { id: 'Xbot', file: 'assets/models/Xbot.glb', label: 'robot humanoïde animé' }
+    );
+    return cat;
+  })();
+  catalogPromise.catch(() => { catalogPromise = null; });
+  return catalogPromise;
+}
+
+function used3D() { try { return JSON.parse(localStorage.getItem('lumen-used-3d') || '[]'); } catch (e) { return []; } }
+function markUsed3D(id) {
+  const u = used3D().filter((x) => x !== id);
+  u.push(id);
+  localStorage.setItem('lumen-used-3d', JSON.stringify(u.slice(-25)));
+}
+
+async function pickFromCatalog(prompt) {
+  const cat = await fetchCatalog();
+  const names = cat.map((c) => c.id + (c.label ? ` (${c.label})` : '')).join(', ');
+  const used = used3D();
+  const out = await llm(`Tu choisis un modèle 3D dans un catalogue pour illustrer : "${prompt}". Catalogue : ${names}. ${used.length ? `Déjà montrés (à éviter si une alternative pertinente existe) : ${used.join(', ')}.` : ''} Important : "robot humanoïde" → Xbot ; "humain/personnage réaliste" → Soldier ; choisis ce qui correspond VRAIMENT au sujet, pas au hasard. Réponds UNIQUEMENT le nom exact du modèle, ou NONE si rien ne correspond.`, 15000);
+  const word = out.trim().split(/[\s,.;:!]/)[0].toLowerCase();
+  if (word === 'none') return null;
+  return cat.find((c) => c.id.toLowerCase() === word) ||
+         cat.find((c) => out.toLowerCase().includes(c.id.toLowerCase())) || null;
 }
 
 function loadGLB(url, timeout = 30000) {
@@ -1443,7 +1494,7 @@ function showSite(html, label) {
 }
 
 function sitePrompt(prompt, compact) {
-  return `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Exigences : design sombre premium (dégradés, glassmorphism), CSS compact dans <style>, textes français courts et réalistes, animations au scroll (IntersectionObserver + transitions CSS). Intègre un objet 3D réel : <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script> puis <model-viewer style="width:100%;height:320px" src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb" camera-controls auto-rotate></model-viewer> (GLB au choix : DamagedHelmet, Duck, ToyCar, WaterBottle — adapte au sujet). Pas d'autres ressources externes. IMPÉRATIF : ${compact ? 'MAXIMUM 90 lignes, ' : 'sois compact (max 140 lignes), '}la réponse doit se terminer par </html>. Réponds UNIQUEMENT le code HTML, sans backticks.`;
+  return `Génère une page web HTML5 complète et AUTONOME pour : "${prompt}". Exigences : design sombre premium (dégradés, glassmorphism), CSS compact dans <style>, textes français courts et réalistes, animations au scroll (IntersectionObserver + transitions CSS). Intègre un objet 3D réel : <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script> puis <model-viewer style="width:100%;height:320px" src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/NOM/glTF-Binary/NOM.glb" camera-controls auto-rotate></model-viewer> en remplaçant NOM par LE modèle qui correspond au sujet : GlamVelvetSofa (canapé), SheenChair (fauteuil), ToyCar (voiture jouet), CarConcept (voiture réaliste), DamagedHelmet (casque sci-fi), Duck (canard), WaterBottle (bouteille), Lantern (lanterne), AntiqueCamera (appareil photo vintage), BoomBox (radio), ChronographWatch (montre) — un canapé pour une boutique de canapés, PAS un casque. Pas d'autres ressources externes. IMPÉRATIF : ${compact ? 'MAXIMUM 90 lignes, ' : 'sois compact (max 140 lignes), '}la réponse doit se terminer par </html>. Réponds UNIQUEMENT le code HTML, sans backticks.`;
 }
 
 function localGameHTML(prompt) {
@@ -1704,9 +1755,32 @@ async function generate() {
     /* ── 3D : objet réel manipulable ── */
     if (cfg.type === 'steps' && currentCap === 'jeu') {
       await pipeline(['Analyse du prompt']);
-      let entry = matchLib3D(prompt);
-      if (!entry) entry = await classifyLib3D(prompt);
       let info, label;
+      /* 1. l'IA fouille le catalogue complet (≈60 GLB), en évitant le déjà-vu */
+      const catStatus = document.createElement('p');
+      catStatus.className = 'play__pipe';
+      catStatus.innerHTML = '⚙ Recherche dans le catalogue open source (≈60 modèles)…';
+      playOut.appendChild(catStatus);
+      let picked = null;
+      try { picked = await pickFromCatalog(prompt); } catch (e) { /* hors-ligne */ }
+      if (picked) {
+        catStatus.innerHTML = `<b>✓</b> Choix de l'IA : « ${picked.id} »${picked.label ? ' — ' + picked.label : ''}`;
+        try {
+          const g = await loadGLB(picked.file, 45000);
+          const rm = [];
+          g.scene.traverse((o) => { if (/cloth|backdrop/i.test(o.name)) rm.push(o); });
+          rm.forEach((o) => o.parent && o.parent.remove(o));
+          info = spawnMini3d(rng, g.scene, 1.8, g.animations);
+          markUsed3D(picked.id);
+          label = `Vrai modèle GLB « ${picked.id} » choisi par l'IA dans le catalogue Khronos (${info.triangles.toLocaleString('fr-FR')} triangles) — cliquer-glisser pour le faire tourner. Historique anti-répétition actif.`;
+        } catch (e) {
+          catStatus.innerHTML = `<b>⚠</b> « ${picked.id} » inaccessible — recherche locale`;
+        }
+      } else {
+        catStatus.innerHTML = '<b>⚠</b> Catalogue distant indisponible — correspondance locale';
+      }
+      let entry = info ? null : matchLib3D(prompt);
+      if (!info && !entry) entry = await classifyLib3D(prompt);
       if (entry) {
         const wait = document.createElement('p');
         wait.className = 'play__pipe';
