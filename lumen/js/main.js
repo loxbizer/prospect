@@ -1015,12 +1015,14 @@ async function llmOnce(prompt, timeout, model = 'openai') {
   } finally { clearTimeout(timer); }
 }
 let lastLLMEngine = '';
-async function llm(prompt, timeout = 35000, statusEl = null) {
+async function llm(prompt, timeout = 35000, statusEl = null, allowLocal = true) {
   try { const r = await llmOnce(prompt, timeout, 'openai'); lastLLMEngine = 'API pollinations.ai (openai)'; return r; }
   catch (e1) {
     try { const r = await llmOnce(prompt, timeout, 'mistral'); lastLLMEngine = 'API pollinations.ai (mistral)'; return r; }
     catch (e2) {
-      /* l'API distante ne répond pas : vrai modèle local dans le navigateur */
+      /* le modèle local (350 Mo, WASM) peut geler l'onglet sur les longues
+         sorties : réservé aux textes courts explicitement autorisés */
+      if (!allowLocal) throw e2;
       const r = await llmLocal(prompt, statusEl);
       lastLLMEngine = 'Qwen 2.5 (0.5B) exécuté dans votre navigateur';
       return r;
@@ -1061,7 +1063,12 @@ async function enhancePrompt(p, cinematic = false) {
 /* nettoyage des sorties vivantes (3D, vidéo, voix) */
 let mini3d = null, vidRaf = 0;
 function cleanupLiveOutputs() {
-  if (mini3d) { cancelAnimationFrame(mini3d.raf); mini3d.renderer.dispose(); mini3d = null; }
+  if (mini3d) {
+    cancelAnimationFrame(mini3d.raf);
+    if (mini3d.audio) { try { mini3d.audio.ctx.close(); } catch (e) { /* déjà fermé */ } }
+    mini3d.renderer.dispose();
+    mini3d = null;
+  }
   if (vidRaf) { cancelAnimationFrame(vidRaf); vidRaf = 0; }
   if ('speechSynthesis' in window) speechSynthesis.cancel();
 }
@@ -1325,7 +1332,7 @@ function matchLib3D(prompt) {
 
 async function classifyLib3D(prompt) {
   try {
-    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: robot, human, sofa, chair, car, duck, fox, helmet, bottle, dragon, abstract. ("robot/android" → robot ; "humain/personnage" → human ; "loup/renard/chien/animal terrestre" → fox ; duck SEULEMENT pour canard/oiseau.) Answer ONLY one word.`, 12000)).toLowerCase();
+    const out = (await llm(`Pick the ONE physical object that best represents "${prompt}" for a 3D model. Use associations: "GTA/course/ville" → car, "guerre/soldat/sci-fi" → helmet, "fantasy/créature" → dragon, "salon/meuble" → sofa or chair, "boisson" → bottle, "animal/oiseau" → duck. Options: robot, human, sofa, chair, car, duck, fox, helmet, bottle, dragon, abstract. ("robot/android" → robot ; "humain/personnage" → human ; "loup/renard/chien/animal terrestre" → fox ; duck SEULEMENT pour canard/oiseau.) Answer ONLY one word.`, 12000, null, false)).toLowerCase();
     for (const w in LIB3D_WORDS) if (out.includes(w)) return LIB3D[LIB3D_WORDS[w]];
   } catch (e) { /* pas grave */ }
   return null;
@@ -1367,7 +1374,7 @@ async function pickFromCatalog(prompt) {
   const cat = await fetchCatalog();
   const names = cat.map((c) => c.id + (c.label ? ` (${c.label})` : '')).join(', ');
   const used = used3D();
-  const out = await llm(`Tu choisis un modèle 3D dans un catalogue pour illustrer : "${prompt}". Catalogue : ${names}. ${used.length ? `Déjà montrés (à éviter si une alternative pertinente existe) : ${used.join(', ')}.` : ''} Important : "robot humanoïde" → Xbot ; "humain/personnage réaliste" → Soldier ; choisis ce qui correspond VRAIMENT au sujet, pas au hasard. Réponds UNIQUEMENT le nom exact du modèle, ou NONE si rien ne correspond.`, 15000);
+  const out = await llm(`Tu choisis un modèle 3D dans un catalogue pour illustrer : "${prompt}". Catalogue : ${names}. ${used.length ? `Déjà montrés (à éviter si une alternative pertinente existe) : ${used.join(', ')}.` : ''} Le modèle doit REPRÉSENTER le sujet demandé. Exemples : "un loup"→Fox, "une voiture réaliste"→CarConcept, "un humain"→Soldier, "un robot"→Xbot, "un échiquier"→ABeautifulGame, "une montre"→ChronographWatch, "un poisson"→BarramundiFish. Ne choisis JAMAIS un modèle sans rapport. Réponds UNIQUEMENT le nom exact du modèle, ou NONE si rien ne correspond.`, 15000, null, false);
   const word = out.trim().split(/[\s,.;:!]/)[0].toLowerCase();
   if (word === 'none') return null;
   return cat.find((c) => c.id.toLowerCase() === word) ||
@@ -1470,8 +1477,106 @@ function spawnMini3d(rng, model3d = null, modelSize = 1.8, anims = null) {
   return { triangles: Math.round(tris) };
 }
 
-/* ═══ CINÉMATIQUE 3D TEMPS RÉEL : map + acteur GLB + caméra de cinéma ═══ */
+/* ═══ CINÉMATIQUE 3D TEMPS RÉEL v2 : map thématisée par l'IA, relief,
+   police, tirs, explosions, son moteur/sirène synthétisé en direct ═══ */
+
+const CINE_THEMES = {
+  ville:  { sky: 0x07051a, fogD: 0.03,  ground: 0x0a0716, grid: 0x22d3ee, gridOp: 0.14, buildings: 46, mountains: 0x14102a, trees: 0, snow: false, stars: false },
+  desert: { sky: 0x150d06, fogD: 0.022, ground: 0x2e2213, grid: 0xffa94d, gridOp: 0.05, buildings: 6,  mountains: 0x3a2c18, trees: 0, snow: false, stars: true },
+  foret:  { sky: 0x061206, fogD: 0.035, ground: 0x08150a, grid: 0x3ddc84, gridOp: 0.05, buildings: 0,  mountains: 0x0c2212, trees: 46, snow: false, stars: false },
+  neige:  { sky: 0x0a0e18, fogD: 0.028, ground: 0x8da3ba, grid: 0xffffff, gridOp: 0.06, buildings: 8,  mountains: 0xbfcede, trees: 26, snow: true, stars: false },
+  espace: { sky: 0x02020a, fogD: 0.008, ground: 0x0a0716, grid: 0x8b5cf6, gridOp: 0.2,  buildings: 0,  mountains: 0x14102a, trees: 0, snow: false, stars: true, crystals: 18 },
+};
+
+async function cineTheme(prompt) {
+  const kw = prompt.toLowerCase();
+  let amb = /d[ée]sert|sable|dune/.test(kw) ? 'desert'
+    : /for[êe]t|jungle|bois|nature/.test(kw) ? 'foret'
+    : /neige|hiver|glace|ski/.test(kw) ? 'neige'
+    : /espace|galax|lune|mars|cosmos/.test(kw) ? 'espace' : null;
+  if (!amb) {
+    try {
+      const t = await llm(`Quel décor convient à "${prompt}" ? Réponds UN mot parmi : ville, desert, foret, neige, espace.`, 9000, null, false);
+      const w = t.toLowerCase();
+      amb = ['ville', 'desert', 'foret', 'neige', 'espace'].find((a) => w.includes(a)) || 'ville';
+    } catch (e) { amb = 'ville'; }
+  }
+  return amb;
+}
+
+/* moteur sonore temps réel de la cinématique (fermé par cleanupLiveOutputs) */
+function cineSound(kind, fx) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  const master = ctx.createGain(); master.gain.value = 0.4; master.connect(ctx.destination);
+  const nb = (dur) => {
+    const b = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  };
+  /* vent d'ambiance */
+  const wind = ctx.createBufferSource(); wind.buffer = nb(2); wind.loop = true;
+  const wf = ctx.createBiquadFilter(); wf.type = 'bandpass'; wf.frequency.value = 340; wf.Q.value = 0.7;
+  const wg = ctx.createGain(); wg.gain.value = 0.1;
+  wind.connect(wf); wf.connect(wg); wg.connect(master); wind.start();
+
+  const out = { ctx, muted: false };
+  out.toggle = () => { out.muted = !out.muted; master.gain.value = out.muted ? 0 : 0.4; return out.muted; };
+
+  if (kind === 'car') {
+    const eng = ctx.createOscillator(); eng.type = 'sawtooth'; eng.frequency.value = 65;
+    const sub = ctx.createOscillator(); sub.type = 'sine'; sub.frequency.value = 33;
+    const ef = ctx.createBiquadFilter(); ef.type = 'lowpass'; ef.frequency.value = 700;
+    const eg = ctx.createGain(); eg.gain.value = 0.25;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 26;
+    const lg = ctx.createGain(); lg.gain.value = 0.12;
+    lfo.connect(lg); lg.connect(eg.gain); lfo.start();
+    eng.connect(ef); sub.connect(ef); ef.connect(eg); eg.connect(master);
+    eng.start(); sub.start();
+    out.setSpeed = (v) => { eng.frequency.value = 55 + v * 140; sub.frequency.value = 28 + v * 40; };
+  } else { out.setSpeed = () => {}; }
+
+  if (fx.police) {
+    const si = ctx.createOscillator(); si.type = 'triangle'; si.frequency.value = 680;
+    const sl = ctx.createOscillator(); sl.type = 'triangle'; sl.frequency.value = 0.9;
+    const slg = ctx.createGain(); slg.gain.value = 170;
+    sl.connect(slg); slg.connect(si.frequency); sl.start();
+    const sg = ctx.createGain(); sg.gain.value = 0.07;
+    si.connect(sg); sg.connect(master); si.start();
+  }
+  out.boom = () => {
+    const t0 = ctx.currentTime;
+    const n = ctx.createBufferSource(); n.buffer = nb(1.4);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(2400, t0); f.frequency.exponentialRampToValueAtTime(80, t0 + 1);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.9, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + 1.2);
+    n.connect(f); f.connect(g); g.connect(master); n.start(t0);
+    const o = ctx.createOscillator(); o.frequency.setValueAtTime(90, t0); o.frequency.exponentialRampToValueAtTime(32, t0 + 0.7);
+    const og = ctx.createGain(); og.gain.setValueAtTime(0.8, t0); og.gain.exponentialRampToValueAtTime(0.001, t0 + 0.9);
+    o.connect(og); og.connect(master); o.start(t0); o.stop(t0 + 1);
+  };
+  out.shot = () => {
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(1400, t0); o.frequency.exponentialRampToValueAtTime(220, t0 + 0.07);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.22, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
+    o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.12);
+  };
+  return out;
+}
+
 async function cinematic3D(prompt, rng, entry) {
+  const kw = prompt.toLowerCase();
+  const fx = {
+    police: /police|flic|poursuite|gendarm/.test(kw),
+    guns: /arme|tir|fusil|gun|shoot|fusillade|mitraill/.test(kw),
+    explosions: /explos|bombe|boom|d[ée]tonation/.test(kw),
+    race: /course|racing|vitesse|rapide|drift|gta/.test(kw),
+  };
+  const amb = await cineTheme(prompt);
+  const T = CINE_THEMES[amb];
+
   const wrap = document.createElement('div');
   wrap.className = 'play__cine';
   const canvas = document.createElement('canvas');
@@ -1479,7 +1584,8 @@ async function cinematic3D(prompt, rng, entry) {
   const barT = document.createElement('div'); barT.className = 'cine-bar cine-bar--t';
   const barB = document.createElement('div'); barB.className = 'cine-bar cine-bar--b';
   const label = document.createElement('span'); label.className = 'cine-label';
-  wrap.appendChild(barT); wrap.appendChild(barB); wrap.appendChild(label);
+  const muteBtn = document.createElement('button'); muteBtn.className = 'cine-mute'; muteBtn.textContent = '🔊';
+  wrap.appendChild(barT); wrap.appendChild(barB); wrap.appendChild(label); wrap.appendChild(muteBtn);
   playOut.appendChild(wrap);
 
   const W = Math.max(playOut.clientWidth - 4, 320), H = Math.round(W * 9 / 16);
@@ -1492,47 +1598,87 @@ async function cinematic3D(prompt, rng, entry) {
   renderer.shadowMap.enabled = true;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x07051a);
-  scene.fog = new THREE.FogExp2(0x07051a, 0.03);
+  scene.background = new THREE.Color(T.sky);
+  scene.fog = new THREE.FogExp2(T.sky, T.fogD);
   scene.environment = heroScene.environment;
-  const cam = new THREE.PerspectiveCamera(40, W / H, 0.1, 200);
+  const cam = new THREE.PerspectiveCamera(40, W / H, 0.1, 300);
 
-  /* map : sol réfléchissant + grille néon + immeubles low-poly seedés */
+  /* sol + grille */
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(300, 300),
-    new THREE.MeshStandardMaterial({ color: 0x0a0716, metalness: 0.7, roughness: 0.45 })
+    new THREE.PlaneGeometry(400, 400),
+    new THREE.MeshStandardMaterial({ color: T.ground, metalness: amb === 'neige' ? 0.1 : 0.7, roughness: amb === 'neige' ? 0.9 : 0.45 })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
-  const grid = new THREE.GridHelper(300, 90, 0x22d3ee, 0x22d3ee);
-  grid.material.transparent = true; grid.material.opacity = 0.14;
+  const grid = new THREE.GridHelper(400, 110, T.grid, T.grid);
+  grid.material.transparent = true; grid.material.opacity = T.gridOp;
   scene.add(grid);
+
+  /* relief : couronne de montagnes low-poly */
+  for (let i = 0; i < 26; i++) {
+    const h = 8 + rng() * 22, r = 7 + rng() * 13;
+    const m = new THREE.Mesh(
+      new THREE.ConeGeometry(r, h, 5 + Math.floor(rng() * 3)),
+      new THREE.MeshStandardMaterial({ color: T.mountains, flatShading: true, metalness: 0.15, roughness: 0.9 })
+    );
+    const ang = rng() * Math.PI * 2, dist = 55 + rng() * 60;
+    m.position.set(Math.cos(ang) * dist, h / 2 - 0.2, Math.sin(ang) * dist);
+    m.rotation.y = rng() * Math.PI;
+    scene.add(m);
+  }
+  /* immeubles / arbres / cristaux selon l'ambiance */
   const bGeo = new THREE.BoxGeometry(1, 1, 1);
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < T.buildings; i++) {
     const bw = 2 + rng() * 4, bh = 3 + rng() * 14, bd = 2 + rng() * 4;
     const b = new THREE.Mesh(bGeo, new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(0.7 + rng() * 0.1, 0.35, 0.09 + rng() * 0.06),
+      color: new THREE.Color().setHSL(0.7 + rng() * 0.1, 0.3, 0.09 + rng() * 0.06),
       emissive: new THREE.Color().setHSL(rng() < 0.5 ? 0.55 : 0.83, 0.8, 0.1),
       metalness: 0.5, roughness: 0.6,
     }));
     b.scale.set(bw, bh, bd);
-    const ang = rng() * Math.PI * 2, dist = 16 + rng() * 55;
+    const ang = rng() * Math.PI * 2, dist = 17 + rng() * 34;
     b.position.set(Math.cos(ang) * dist, bh / 2, Math.sin(ang) * dist);
     b.castShadow = true;
     scene.add(b);
   }
-  const key = new THREE.SpotLight(0xbfd8ff, 250, 120, Math.PI / 4, 0.5, 1.4);
-  key.position.set(18, 30, 12); key.castShadow = true; key.shadow.mapSize.set(1024, 1024);
+  for (let i = 0; i < (T.trees || 0); i++) {
+    const h = 2.2 + rng() * 3.5;
+    const tr = new THREE.Mesh(
+      new THREE.ConeGeometry(0.8 + rng() * 0.8, h, 7),
+      new THREE.MeshStandardMaterial({ color: amb === 'neige' ? 0xdde7f0 : 0x1c4d28, flatShading: true, roughness: 0.9 })
+    );
+    const ang = rng() * Math.PI * 2, dist = 16 + rng() * 32;
+    tr.position.set(Math.cos(ang) * dist, h / 2, Math.sin(ang) * dist);
+    tr.castShadow = true;
+    scene.add(tr);
+  }
+  for (let i = 0; i < (T.crystals || 0); i++) {
+    const c = new THREE.Mesh(
+      new THREE.OctahedronGeometry(1 + rng() * 2.2),
+      new THREE.MeshStandardMaterial({ color: 0x8b5cf6, emissive: 0x4c1d95, metalness: 0.8, roughness: 0.2, flatShading: true })
+    );
+    const ang = rng() * Math.PI * 2, dist = 15 + rng() * 35;
+    c.position.set(Math.cos(ang) * dist, 1.5 + rng() * 6, Math.sin(ang) * dist);
+    scene.add(c);
+  }
+  if (T.snow) { const sn = makeParticles(700, 60, 0.09, 0xffffff); sn.position.y = 10; scene.add(sn); scene.userData.snow = sn; }
+  if (T.stars) { const st = makeParticles(500, 160, 0.25, 0xbfd8ff); st.position.y = 60; scene.add(st); }
+
+  const key = new THREE.SpotLight(0xbfd8ff, 250, 160, Math.PI / 4, 0.5, 1.4);
+  key.position.set(18, 34, 12); key.castShadow = true; key.shadow.mapSize.set(1024, 1024);
   scene.add(key);
-  scene.add(new THREE.AmbientLight(0x201a38, 2.4));
+  scene.add(new THREE.AmbientLight(0x201a38, amb === 'neige' ? 4 : 2.4));
   const neonA = new THREE.PointLight(0x22d3ee, 120, 60, 1.6); neonA.position.set(-12, 4, -8); scene.add(neonA);
   const neonB = new THREE.PointLight(0xe879f9, 120, 60, 1.6); neonB.position.set(12, 4, 8); scene.add(neonB);
 
-  /* acteur */
+  /* acteur (podium ToyCar retiré) */
   const g = await loadGLB(entry.file);
   const rm = [];
-  g.scene.traverse((o) => { if (/cloth|backdrop/i.test(o.name)) rm.push(o); if (o.isMesh) o.castShadow = true; });
+  g.scene.traverse((o) => {
+    if (/cloth|backdrop/i.test(o.name) || (/ToyCar/.test(entry.file) && /^(fabric|glass)$/i.test(o.name))) rm.push(o);
+    if (o.isMesh) o.castShadow = true;
+  });
   rm.forEach((o) => o.parent && o.parent.remove(o));
   const actorSize = entry.kind === 'car' ? 3.2 : entry.kind === 'humanoid' ? 1.9 : 2.6;
   const inner = g.scene;
@@ -1552,58 +1698,143 @@ async function cinematic3D(prompt, rng, entry) {
     mixer.clipAction(run).play();
   }
 
-  /* trajectoire + caméras */
-  const SHOT_LEN = 3.4;
-  const SHOTS_N = 4;
+  /* voiture de police en poursuite */
+  let police = null, lightR = null, lightB = null;
+  if (fx.police) {
+    police = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1, 0.45, 2.1), new THREE.MeshStandardMaterial({ color: 0x0f1e4d, metalness: 0.7, roughness: 0.35 }));
+    body.position.y = 0.45; police.add(body);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.35, 1), new THREE.MeshStandardMaterial({ color: 0xd8e2f0, metalness: 0.4, roughness: 0.3 }));
+    cab.position.set(0, 0.82, -0.1); police.add(cab);
+    [[-0.5, 0.75], [0.5, 0.75], [-0.5, -0.75], [0.5, -0.75]].forEach(([wx, wz]) => {
+      const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.16, 12), new THREE.MeshStandardMaterial({ color: 0x111118, roughness: 0.9 }));
+      wh.rotation.z = Math.PI / 2;
+      wh.position.set(wx, 0.22, wz);
+      police.add(wh);
+    });
+    const barGeo = new THREE.BoxGeometry(0.22, 0.1, 0.22);
+    const mR = new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2222, emissiveIntensity: 2 });
+    const mB = new THREE.MeshStandardMaterial({ color: 0x000033, emissive: 0x2244ff, emissiveIntensity: 2 });
+    const gyR = new THREE.Mesh(barGeo, mR); gyR.position.set(-0.16, 1.05, -0.1); police.add(gyR);
+    const gyB = new THREE.Mesh(barGeo, mB); gyB.position.set(0.16, 1.05, -0.1); police.add(gyB);
+    lightR = new THREE.PointLight(0xff2222, 0, 14, 1.8); lightR.position.set(0, 1.4, 0); police.add(lightR);
+    lightB = new THREE.PointLight(0x2244ff, 0, 14, 1.8); lightB.position.set(0, 1.4, 0.1); police.add(lightB);
+    police.userData = { gyR: mR, gyB: mB };
+    police.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    scene.add(police);
+  }
+
+  /* traceurs de tirs + explosions */
+  const tracer = fx.guns ? new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.025, 1, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0 })
+  ) : null;
+  if (tracer) scene.add(tracer);
+  const flame = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0xffa94d, transparent: true, opacity: 0 })
+  );
+  const flameLight = new THREE.PointLight(0xff7722, 0, 40, 1.6);
+  scene.add(flame); scene.add(flameLight);
+
+  const sound = cineSound(entry.kind, fx);
+  muteBtn.addEventListener('click', () => { muteBtn.textContent = sound.toggle() ? '🔇' : '🔊'; });
+
+  /* trajectoire + plans caméra */
+  const SHOT_LEN = 3.4, SHOTS_N = 4;
+  const speedMul = fx.race ? 1.35 : 1;
   const pathPos = (t) => {
-    const w = entry.kind === 'car' ? 0.55 : entry.kind === 'humanoid' ? 0.35 : 0.3;
-    const rx = entry.kind === 'car' ? 11 : 7, rz = entry.kind === 'car' ? 7 : 7;
+    const w = (entry.kind === 'car' ? 0.55 : entry.kind === 'humanoid' ? 0.35 : 0.3) * speedMul;
+    const rx = entry.kind === 'car' ? 11 : 7, rz = 7;
     const y = entry.kind === 'dragon' ? 3 + Math.sin(t * 1.1) * 1.2 : 0;
     return new THREE.Vector3(Math.cos(t * w) * rx, y, Math.sin(t * w * (entry.kind === 'car' ? 1.6 : 1)) * rz);
   };
   const start = performance.now();
-  let lastT = start;
-  mini3d = { renderer, raf: 0 };
-  const _p = new THREE.Vector3(), _p2 = new THREE.Vector3();
+  let lastT = start, nextBoom = 2.5, nextShot = 1.2, boomAge = 99;
+  mini3d = { renderer, raf: 0, audio: sound };
+  const _p = new THREE.Vector3(), _p2 = new THREE.Vector3(), _pp = new THREE.Vector3(), _pp2 = new THREE.Vector3();
   const tickCine = () => {
     if (!mini3d) return;
     const now = performance.now();
     const t = (now - start) / 1000;
     const dt = Math.min((now - lastT) / 1000, 0.05);
     lastT = now;
-    if (mixer) mixer.update(dt);
-    /* position + cap de l'acteur */
-    _p.copy(pathPos(t));
-    _p2.copy(pathPos(t + 0.06));
+    if (mixer) mixer.update(dt * speedMul);
+    _p.copy(pathPos(t)); _p2.copy(pathPos(t + 0.06));
     actor.position.copy(_p);
     actor.lookAt(_p2.x, _p.y, _p2.z);
+    const speed = _p2.distanceTo(_p) / 0.06;
+    sound.setSpeed(Math.min(speed / 8, 1));
     if (entry.kind === 'car') {
-      const drift = Math.sin(t * 1.7) * 0.4;               /* dérapages */
+      const drift = Math.sin(t * 1.7) * 0.4;
       actor.rotation.y += drift;
-      inner.rotation.z = Math.sin(t * 1.7) * 0.07;          /* roulis */
+      inner.rotation.z = Math.sin(t * 1.7) * 0.07;
     }
-    /* plans caméra : coupes franches toutes les SHOT_LEN secondes */
+    /* police : 0.55 s derrière, gyrophares alternés */
+    if (police) {
+      _pp.copy(pathPos(t - 0.55)); _pp2.copy(pathPos(t - 0.49));
+      police.position.copy(_pp);
+      police.lookAt(_pp2.x, _pp.y, _pp2.z);
+      const blink = Math.floor(t * 6) % 2;
+      police.userData.gyR.emissiveIntensity = blink ? 4 : 0.3;
+      police.userData.gyB.emissiveIntensity = blink ? 0.3 : 4;
+      lightR.intensity = blink ? 60 : 0;
+      lightB.intensity = blink ? 0 : 60;
+    }
+    /* tirs traceurs police → acteur */
+    if (tracer && police && t > nextShot) {
+      nextShot = t + 0.5 + rng() * 0.9;
+      sound.shot();
+      tracer.material.opacity = 1;
+      const from = police.position.clone().add(new THREE.Vector3(0, 0.8, 0));
+      const to = actor.position.clone().add(new THREE.Vector3((rng() - 0.5) * 1.4, 0.7, (rng() - 0.5) * 1.4));
+      const mid = from.clone().lerp(to, 0.5);
+      tracer.position.copy(mid);
+      tracer.scale.y = from.distanceTo(to);
+      tracer.lookAt(to);
+      tracer.rotateX(Math.PI / 2);
+    }
+    if (tracer) tracer.material.opacity *= 0.82;
+    /* explosions */
+    if (fx.explosions && t > nextBoom) {
+      nextBoom = t + 2.2 + rng() * 1.8;
+      boomAge = 0;
+      const bp = pathPos(t + 0.5).add(new THREE.Vector3((rng() - 0.5) * 10, 0.5, (rng() - 0.5) * 10));
+      flame.position.copy(bp); flameLight.position.copy(bp);
+      sound.boom();
+    }
+    boomAge += dt;
+    if (boomAge < 1) {
+      flame.scale.setScalar(0.4 + boomAge * 5);
+      flame.material.opacity = Math.max(0, 0.85 - boomAge);
+      flameLight.intensity = Math.max(0, 300 * (1 - boomAge));
+    } else { flame.material.opacity = 0; flameLight.intensity = 0; }
+    /* neige qui tombe */
+    if (scene.userData.snow) { scene.userData.snow.position.y -= dt * 1.2; if (scene.userData.snow.position.y < 2) scene.userData.snow.position.y = 10; }
+    /* plans caméra */
     const shot = Math.floor(t / SHOT_LEN) % SHOTS_N;
     const st = (t % SHOT_LEN) / SHOT_LEN;
     const heading = Math.atan2(_p2.x - _p.x, _p2.z - _p.z);
-    if (shot === 0) {          /* poursuite arrière */
+    if (shot === 0) {
       cam.position.set(_p.x - Math.sin(heading) * 6, _p.y + 2.2, _p.z - Math.cos(heading) * 6);
-    } else if (shot === 1) {   /* travelling latéral bas */
+    } else if (shot === 1) {
       cam.position.set(_p.x + Math.cos(heading) * 4.5, _p.y + 0.7, _p.z - Math.sin(heading) * 4.5);
-    } else if (shot === 2) {   /* contre-plongée frontale, l'acteur passe devant */
+    } else if (shot === 2) {
       const ahead = pathPos(Math.floor(t / SHOT_LEN) * SHOT_LEN + SHOT_LEN * 0.7);
       cam.position.set(ahead.x, 0.5, ahead.z + 2.5);
-    } else {                   /* grue large */
+    } else {
       cam.position.set(Math.cos(t * 0.15) * 13, 6 + st * 2.5, Math.sin(t * 0.15) * 13);
     }
     cam.lookAt(_p.x, _p.y + 0.8, _p.z);
-    label.textContent = 'PLAN ' + (shot + 1) + '/' + SHOTS_N + ' · CINÉMATIQUE 3D TEMPS RÉEL';
+    const fxTags = [fx.police && 'POLICE', fx.guns && 'TIRS', fx.explosions && 'EXPLOSIONS'].filter(Boolean).join(' · ');
+    label.textContent = `PLAN ${shot + 1}/${SHOTS_N} · ${amb.toUpperCase()}${fxTags ? ' · ' + fxTags : ''} · 3D TEMPS RÉEL`;
     neonA.intensity = 110 + Math.sin(t * 2.4) * 40;
     neonB.intensity = 110 + Math.cos(t * 1.9) * 40;
     renderer.render(scene, cam);
     mini3d.raf = requestAnimationFrame(tickCine);
   };
   tickCine();
+  return amb;
 }
 
 /* lecteur façon bande-annonce : coupes franches, zoom lent, letterbox, grain */
@@ -1953,13 +2184,13 @@ async function generate() {
         /* le LLM écrit d'abord une fiche de design pour thématiser le jeu */
         let design = null;
         try {
-          const dj = await llm(`Fiche de design JSON pour un mini-jeu 2D sur le thème "${prompt}". Réponds UNIQUEMENT un JSON valide : {"titre":"…","couleurJoueur":"#hex","couleurEnnemis":"#hex","couleurFond":"#hex sombre","ennemis":"nom court des ennemis","style":"blocs" ou "rond"} — "blocs" si le thème évoque roblox/minecraft/lego, sinon au choix.`, 18000);
+          const dj = await llm(`Fiche de design JSON pour un mini-jeu 2D sur le thème "${prompt}". Réponds UNIQUEMENT un JSON valide : {"titre":"…","couleurJoueur":"#hex","couleurEnnemis":"#hex","couleurFond":"#hex sombre","ennemis":"nom court des ennemis","style":"blocs" ou "rond"} — "blocs" si le thème évoque roblox/minecraft/lego, sinon au choix.`, 18000, null, false);
           design = JSON.parse(dj.slice(dj.indexOf('{'), dj.lastIndexOf('}') + 1));
           gameStatus.innerHTML = `<b>✓</b> DA : « ${design.titre || prompt} », ennemis « ${design.ennemis || '?'} », style ${design.style || 'rond'}`;
         } catch (e) { /* défauts seedés */ }
         let ghtml = null;
         try {
-          ghtml = stripFences(await llm(`Crée un MINI-JEU HTML5 JOUABLE sur le thème "${prompt}" : une page HTML complète avec <canvas> plein écran, un joueur déplaçable (flèches/ZQSD), tir vers la souris au clic, ennemis qui apparaissent et poursuivent, score et vies affichés, écran "clique pour jouer", game over avec rejouer. Style néon sombre. Tout le JS inline, AUCUNE ressource externe. IMPÉRATIF : max 130 lignes et termine par </html>. Réponds UNIQUEMENT le HTML.`, 60000, gameStatus));
+          ghtml = stripFences(await llm(`Crée un MINI-JEU HTML5 JOUABLE sur le thème "${prompt}" : une page HTML complète avec <canvas> plein écran, un joueur déplaçable (flèches/ZQSD), tir vers la souris au clic, ennemis qui apparaissent et poursuivent, score et vies affichés, écran "clique pour jouer", game over avec rejouer. Style néon sombre. Tout le JS inline, AUCUNE ressource externe. IMPÉRATIF : max 130 lignes et termine par </html>. Réponds UNIQUEMENT le HTML.`, 60000, gameStatus, false));
           if (!/<canvas/i.test(ghtml) || !/<\/html>\s*$/i.test(ghtml)) throw new Error('jeu invalide');
           gameStatus.innerHTML = `<b>✓</b> Jeu écrit par : ${lastLLMEngine}`;
         } catch (e) {
@@ -1978,13 +2209,13 @@ async function generate() {
       let html = null;
       try {
         html = stripFences(await llm(
-          sitePrompt(prompt, false), 60000, siteStatus));
+          sitePrompt(prompt, false), 60000, siteStatus, false));
         if (!/</.test(html || '')) throw new Error('sortie invalide');
         if (!/<\/html>\s*$/i.test(html)) {
           /* sortie tronquée par la limite du modèle : seconde passe plus courte */
           siteStatus.innerHTML = '⚙ Sortie tronquée — régénération en version compacte…';
           try {
-            const html2 = stripFences(await llm(sitePrompt(prompt, true), 60000, siteStatus));
+            const html2 = stripFences(await llm(sitePrompt(prompt, true), 60000, siteStatus, false));
             if (/<\/html>\s*$/i.test(html2)) html = html2;
           } catch (e) { /* on garde la première */ }
         }
@@ -2001,14 +2232,28 @@ async function generate() {
     if (cfg.type === 'steps' && currentCap === 'jeu') {
       await pipeline(['Analyse du prompt']);
       let info, label;
-      /* 1. l'IA fouille le catalogue complet (≈60 GLB), en évitant le déjà-vu */
+      /* 1. correspondance directe par mots-clés (déterministe et sûre) */
+      const kwEntry = matchLib3D(prompt);
       const catStatus = document.createElement('p');
       catStatus.className = 'play__pipe';
-      catStatus.innerHTML = '⚙ Recherche dans le catalogue open source (≈60 modèles)…';
+      catStatus.innerHTML = kwEntry
+        ? `<b>✓</b> Correspondance directe : « ${kwEntry.name} »`
+        : '⚙ Recherche dans le catalogue open source (≈60 modèles)…';
       playOut.appendChild(catStatus);
+      if (kwEntry) {
+        try {
+          const g = await loadGLB(kwEntry.file, 45000);
+          const rm = [];
+          g.scene.traverse((o) => { if (/cloth|backdrop/i.test(o.name) || (/ToyCar/.test(kwEntry.file) && /^(fabric|glass)$/i.test(o.name))) rm.push(o); });
+          rm.forEach((o) => o.parent && o.parent.remove(o));
+          info = spawnMini3d(rng, g.scene, kwEntry.size || 1.8, g.animations);
+          label = `Vrai modèle 3D « ${kwEntry.name} » (${info.triangles.toLocaleString('fr-FR')} triangles) — cliquer-glisser pour le faire tourner.`;
+        } catch (e) { catStatus.innerHTML = `<b>⚠</b> « ${kwEntry.name} » inaccessible — recherche IA`; }
+      }
+      /* 2. sinon l'IA fouille le catalogue complet, en évitant le déjà-vu */
       let picked = null;
-      try { picked = await pickFromCatalog(prompt); } catch (e) { /* hors-ligne */ }
-      if (picked) {
+      if (!info) { try { picked = await pickFromCatalog(prompt); } catch (e) { /* hors-ligne */ } }
+      if (picked && !info) {
         catStatus.innerHTML = `<b>✓</b> Choix de l'IA : « ${picked.id} »${picked.label ? ' — ' + picked.label : ''}`;
         try {
           const g = await loadGLB(picked.file, 45000);
